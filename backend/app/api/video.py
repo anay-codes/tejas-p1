@@ -1,135 +1,162 @@
+"""
+TEJAS Video API — Phase 2
+Uses CameraManager for multi-camera support.
+Backward compatible: defaults to CAM-00 when no camera_id is specified.
+"""
 from typing import Optional, Any, Dict, List
-from fastapi import APIRouter, Response, HTTPException
+
+from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
-from app.services.video_pipeline import pipeline
+
+from app.services.camera_manager import camera_manager
 from app.services.video_source import VideoSource
+from app.config import settings
 
 router = APIRouter(prefix="/video", tags=["Video Pipeline & Live Streams"])
 
+
 class VideoConfigRequest(BaseModel):
-    confidence: Optional[float] = Field(None, ge=0.1, le=0.95, description="Detection confidence threshold")
-    source: Optional[Any] = Field(None, description="Camera index (0) or RTSP / video path")
-    processing_fps: Optional[int] = Field(None, ge=5, le=30, description="Target processing FPS")
+    confidence: Optional[float] = Field(None, ge=0.1, le=0.95)
+    processing_fps: Optional[int] = Field(None, ge=5, le=30)
+    camera_id: str = "CAM-00"
+
 
 class VideoTestRequest(BaseModel):
-    source: Any = Field(..., description="Camera device index (e.g. 0, 1), RTSP URL, or video file path")
+    source: Any = Field(..., description="Webcam index, RTSP URL, or file path")
+
 
 class VideoSwitchRequest(BaseModel):
-    source: Any = Field(..., description="Verified camera source to switch active ingestion to")
+    source: Any = Field(..., description="New camera source")
+    camera_id: str = "CAM-00"
 
+
+class CameraStartRequest(BaseModel):
+    camera_id: str
+    source: Any
+
+
+# ── MJPEG Stream ──────────────────────────────
 @router.get("/feed")
-def get_live_video_feed():
-    """
-    Real-time MJPEG live stream endpoint.
-    Streams annotated frames with YOLOv8 detection boxes and ByteTrack IDs.
-    """
-    if not pipeline.is_running:
-        pipeline.start()
+def get_live_video_feed(camera_id: str = Query(default="CAM-00")):
+    """Real-time annotated MJPEG stream from a camera pipeline."""
+    p = camera_manager.get_pipeline(camera_id)
+    if p is None:
+        # Auto-start primary camera with configured source
+        src = settings.get_resolved_video_source()
+        camera_manager.start_camera(camera_id, src)
+        p = camera_manager.get_pipeline(camera_id)
+
+    if p is None:
+        raise HTTPException(status_code=503, detail=f"Camera pipeline {camera_id} unavailable")
+
     return StreamingResponse(
-        pipeline.generate_mjpeg_stream(),
-        media_type="multipart/x-mixed-replace; boundary=frame"
+        p.generate_mjpeg_stream(),
+        media_type="multipart/x-mixed-replace; boundary=frame",
     )
 
-@router.get("/telemetry")
-def get_video_telemetry():
-    """
-    Returns real-time inference telemetry: FPS, inference time, detected counts,
-    and active tracking objects with stable track IDs.
-    """
-    return pipeline.get_telemetry()
 
+# ── Telemetry ─────────────────────────────────
+@router.get("/telemetry")
+def get_video_telemetry(camera_id: str = Query(default="CAM-00")):
+    """Returns real-time inference telemetry for a camera."""
+    p = camera_manager.get_pipeline(camera_id)
+    if p is None:
+        return {"camera_id": camera_id, "is_connected": False, "error": "Not running"}
+    return p.get_telemetry()
+
+
+@router.get("/telemetry/all")
+def get_all_telemetry():
+    """Returns telemetry for all active camera pipelines."""
+    return camera_manager.get_all_telemetry()
+
+
+# ── Status ─────────────────────────────────────
 @router.get("/status")
-def get_video_status():
-    """
-    Returns the hardware and connection status of the active video pipeline.
-    """
+def get_video_status(camera_id: str = Query(default="CAM-00")):
+    p = camera_manager.get_pipeline(camera_id)
+    if p is None:
+        return {"camera_id": camera_id, "status": "NOT_STARTED", "is_connected": False}
     return {
-        "status": "OPERATIONAL" if pipeline.is_connected else "OFFLINE",
-        "is_running": pipeline.is_running,
-        "is_connected": pipeline.is_connected,
-        "source": str(pipeline.source),
-        "device": pipeline.device,
-        "model": pipeline.model_name,
-        "actual_fps": pipeline.actual_fps,
-        "infer_fps": pipeline.infer_fps,
-        "capture_fps": pipeline.capture_fps,
-        "inference_ms": pipeline.inference_ms
+        "camera_id": camera_id,
+        "status": "OPERATIONAL" if p.is_connected else "OFFLINE",
+        "is_running": p.is_running,
+        "is_connected": p.is_connected,
+        "source": str(p.source),
+        "device": p.device,
+        "capture_fps": p.capture_fps,
+        "infer_fps": p.infer_fps,
+        "inference_ms": p.inference_ms,
     }
 
+
+# ── Active cameras ─────────────────────────────
+@router.get("/cameras/active")
+def get_active_cameras():
+    return {"active_cameras": camera_manager.list_active()}
+
+
+# ── Discover local cameras ─────────────────────
 @router.get("/discover")
 def discover_camera_sources() -> List[Dict[str, Any]]:
-    """
-    Discovers available local camera hardware devices (indices 0..3) with resolutions
-    and active illumination status without disrupting the running pipeline.
-    """
-    return VideoSource.probe_local_cameras(
-        max_indices=4,
-        active_source=pipeline.source if pipeline.is_running else None,
-        active_telemetry=pipeline.get_telemetry() if pipeline.is_running else None
-    )
+    """Discovers available local webcam devices."""
+    return VideoSource.probe_local_cameras(max_indices=4)
 
+
+# ── Test source ────────────────────────────────
 @router.post("/test")
 def test_camera_source(payload: VideoTestRequest) -> Dict[str, Any]:
-    """
-    Safely tests any camera source (Webcam index, RTSP URL, or MP4) before switching.
-    Does NOT affect the currently running video stream.
-    """
     src = payload.source
     if isinstance(src, str) and src.isdigit():
         src = int(src)
-    return VideoSource.test_source(
-        src, 
-        timeout_seconds=3.0,
-        active_source=pipeline.source if pipeline.is_running else None,
-        active_telemetry=pipeline.get_telemetry() if pipeline.is_running else None
-    )
+    return VideoSource.test_source(src, timeout_seconds=3.0)
 
+
+# ── Switch source ──────────────────────────────
 @router.post("/switch")
 def switch_camera_source(payload: VideoSwitchRequest) -> Dict[str, Any]:
-    """
-    Safely switches the active video pipeline to a new camera source.
-    Pre-verifies the candidate first; if it fails, the previous working stream stays active.
-    """
     src = payload.source
     if isinstance(src, str) and src.isdigit():
         src = int(src)
-
-    if not pipeline.is_running:
-        pipeline.start()
-
-    res = pipeline.switch_source(src)
+    res = camera_manager.switch_source(payload.camera_id, src)
     if not res.get("success"):
-        raise HTTPException(status_code=400, detail=res.get("error", "Failed to switch camera source"))
+        raise HTTPException(status_code=400, detail=res.get("error", "Switch failed"))
     return res
 
+
+# ── Config ─────────────────────────────────────
 @router.post("/config")
 def update_video_config(payload: VideoConfigRequest):
-    """
-    Dynamically adjusts video pipeline parameters (confidence, processing FPS, source).
-    """
-    src = payload.source
-    if src is not None and isinstance(src, str) and src.isdigit():
-        src = int(src)
+    p = camera_manager.get_pipeline(payload.camera_id)
+    if p is None:
+        raise HTTPException(status_code=404, detail=f"Camera {payload.camera_id} not running")
+    with p.lock:
+        if payload.confidence is not None:
+            p.confidence_threshold = max(0.1, min(0.95, payload.confidence))
+        if payload.processing_fps is not None:
+            p.inference_fps = max(5, min(30, payload.processing_fps))
+    return {"message": "Config updated", "telemetry": p.get_telemetry()}
 
-    pipeline.set_config(
-        confidence=payload.confidence,
-        source=src,
-        processing_fps=payload.processing_fps
-    )
-    return {
-        "message": "Configuration updated successfully",
-        "telemetry": pipeline.get_telemetry()
-    }
 
+# ── Start / Stop single camera ─────────────────
 @router.post("/start")
-def start_video_pipeline():
-    if not pipeline.is_running:
-        pipeline.start()
-    return {"message": "Video pipeline started", "status": "RUNNING"}
+def start_camera_pipeline(payload: CameraStartRequest):
+    src = payload.source
+    if isinstance(src, str) and src.isdigit():
+        src = int(src)
+    ok = camera_manager.start_camera(payload.camera_id, src)
+    return {"message": f"Camera {payload.camera_id} started", "success": ok}
+
 
 @router.post("/stop")
-def stop_video_pipeline():
-    if pipeline.is_running:
-        pipeline.stop()
-    return {"message": "Video pipeline stopped", "status": "STOPPED"}
+def stop_camera_pipeline(camera_id: str = Query(default="CAM-00")):
+    camera_manager.stop_camera(camera_id)
+    return {"message": f"Camera {camera_id} stopped"}
+
+
+# ── Reload zones ───────────────────────────────
+@router.post("/zones/reload")
+def reload_zones(camera_id: Optional[str] = Query(default=None)):
+    camera_manager.reload_zones(camera_id)
+    return {"message": "Zones reloaded", "camera_id": camera_id or "all"}

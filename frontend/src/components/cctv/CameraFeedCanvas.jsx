@@ -1,17 +1,14 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { Maximize2, Shield, Eye, Radio, Sparkles, RefreshCw, AlertTriangle, Video, CheckCircle2 } from 'lucide-react';
+import { RefreshCw, AlertCircle } from 'lucide-react';
 import { renderCCTVFrame } from '../../utils/canvasRenderer';
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
-const LIVE_FEED_URL = `${API_BASE}/video/feed`;
 
 export default function CameraFeedCanvas({ 
   camera, 
   entities = [], 
   zones = [], 
   tick = 0,
-  onSelect = null,
-  isFocused = false,
   isLive = false,
   telemetry = null
 }) {
@@ -22,7 +19,6 @@ export default function CameraFeedCanvas({
   const [isReconnecting, setIsReconnecting] = useState(false);
 
   useEffect(() => {
-    // Only run canvas loop if not running in real video mode
     if (isLive) return;
 
     const canvas = canvasRef.current;
@@ -40,7 +36,6 @@ export default function CameraFeedCanvas({
     };
   }, [camera, entities, zones, tick, isLive]);
 
-  // Handle transient image stream errors with auto-recovery
   const handleStreamError = useCallback(() => {
     if (retryCount < 3) {
       setIsReconnecting(true);
@@ -63,45 +58,38 @@ export default function CameraFeedCanvas({
     setStreamKey(Date.now());
   };
 
-  // AI Pipeline tags
-  const aiTags = [
-    { label: isLive ? 'YOLOv8-N (Real)' : 'Person Det', active: true },
-    { label: isLive ? 'ByteTrack' : 'Tracking', active: true },
-    { label: isLive ? `${telemetry?.device?.toUpperCase() || 'CPU'}` : 'Zone Fence', active: true },
-    { label: isLive ? `CAP: ${telemetry?.fps || 0} FPS` : 'Sim', active: true },
-    { label: isLive ? `INF: ${telemetry?.infer_fps || 0} FPS` : 'OSD', active: true },
-    { label: isLive ? `LAT: ${telemetry?.inference_ms || 0}ms` : 'HUD', active: true }
-  ];
+  const camCode = camera?.code || camera?.id || 'CAM-00';
+  const liveUrl = `${API_BASE}/video/feed?camera_id=${encodeURIComponent(camCode)}`;
 
   return (
-    <div className="group tactical-card rounded-xl overflow-hidden border border-[#1E2D48] relative flex flex-col transition-all duration-200 hover:border-cyan-500/40">
-      {/* Feed Area */}
-      <div className="relative aspect-video bg-black w-full overflow-hidden flex items-center justify-center">
+    <div className="bg-white rounded-lg border border-slate-200 overflow-hidden shadow-sm flex flex-col">
+      {/* Video Viewport */}
+      <div className="relative aspect-video bg-slate-950 w-full overflow-hidden flex items-center justify-center">
         {isLive ? (
           streamError ? (
-            <div className="flex flex-col items-center justify-center p-6 text-center space-y-3 bg-[#070B14] w-full h-full">
-              <AlertTriangle className="w-8 h-8 text-amber-400 animate-bounce" />
-              <div className="text-xs font-mono text-slate-300 font-bold">
-                CAMERA STREAM DISCONNECTED
+            <div className="flex flex-col items-center justify-center p-6 text-center text-slate-400 w-full h-full">
+              <AlertCircle className="w-8 h-8 text-amber-500 mb-2" />
+              <div className="text-xs font-semibold text-slate-200 mb-1">
+                Camera Stream Offline
               </div>
-              <p className="text-[11px] font-mono text-slate-500 max-w-sm">
-                Target camera device ({telemetry?.source ?? 'Default'}) is not delivering frames. Use "+ Add / Switch Camera" to select an active source.
+              <p className="text-[11px] text-slate-400 max-w-sm mb-3">
+                Unable to receive video frames from node {camCode}.
               </p>
               <button
                 onClick={handleManualRetry}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-mono font-semibold transition-colors"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium transition-colors"
               >
                 <RefreshCw className="w-3.5 h-3.5" />
-                <span>Reconnect Stream</span>
+                <span>Retry Connection</span>
               </button>
             </div>
           ) : (
             <>
               <img
                 key={streamKey}
-                src={`${LIVE_FEED_URL}?t=${streamKey}`}
-                alt="TEJAS Live YOLOv8 Stream"
-                className="w-full h-full object-contain bg-black"
+                src={`${liveUrl}&t=${streamKey}`}
+                alt={`Live Feed: ${camCode}`}
+                className="w-full h-full object-cover"
                 onError={handleStreamError}
                 onLoad={() => {
                   setStreamError(false);
@@ -110,9 +98,9 @@ export default function CameraFeedCanvas({
                 }}
               />
               {isReconnecting && (
-                <div className="absolute top-2 right-2 flex items-center gap-1 px-2 py-0.5 rounded bg-amber-500/90 text-black font-mono text-[10px] font-bold shadow-lg z-20 animate-pulse">
+                <div className="absolute top-3 right-3 flex items-center gap-1.5 px-2.5 py-1 rounded bg-slate-900/80 text-white text-[11px] font-medium backdrop-blur-sm z-20">
                   <RefreshCw className="w-3 h-3 animate-spin" />
-                  <span>STREAM SYNCING...</span>
+                  <span>Reconnecting...</span>
                 </div>
               )}
             </>
@@ -126,52 +114,29 @@ export default function CameraFeedCanvas({
           />
         )}
 
-        {/* Live Indicator Pill in Corner */}
+        {/* Minimal Corner Overlay */}
         {isLive && !streamError && (
-          <div className="absolute top-2 left-2 flex items-center gap-1.5 px-2 py-0.5 rounded bg-red-600/90 text-white font-mono text-[10px] font-extrabold shadow-lg z-10">
-            <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping" />
-            <span>LIVE HARDWARE INGEST</span>
+          <div className="absolute top-3 left-3 flex items-center gap-2 z-10">
+            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-semibold bg-red-600 text-white shadow-sm">
+              <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
+              LIVE
+            </span>
+            <span className="px-2 py-0.5 rounded text-[10px] font-mono font-medium bg-slate-900/75 text-slate-200 backdrop-blur-sm">
+              {camCode}
+            </span>
           </div>
         )}
-
-        {/* Tactical Crosshair / Corner Reticles */}
-        <div className="absolute inset-0 pointer-events-none p-3 flex flex-col justify-between opacity-60">
-          <div className="flex justify-between">
-            <div className="w-3 h-3 border-t-2 border-l-2 border-cyan-400" />
-            <div className="w-3 h-3 border-t-2 border-r-2 border-cyan-400" />
-          </div>
-          <div className="flex justify-between">
-            <div className="w-3 h-3 border-b-2 border-l-2 border-cyan-400" />
-            <div className="w-3 h-3 border-b-2 border-r-2 border-cyan-400" />
-          </div>
-        </div>
       </div>
 
-      {/* Camera Meta & Telemetry Sub-bar */}
-      <div className="p-3 bg-[#0B111E] border-t border-[#1E2D48] flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-          <span className="text-xs font-mono font-bold text-slate-200">
-            {isLive ? `ACTIVE SOURCE: ${telemetry?.source ?? '0'}` : (camera?.name || 'CAM-01')}
-          </span>
-          <span className="text-[10px] font-mono text-slate-500">
-            {isLive ? `${telemetry?.active_tracks?.length || 0} Tracks` : (camera?.location || 'Sector A')}
-          </span>
+      {/* Clean Bottom Meta Row */}
+      <div className="px-3.5 py-2.5 bg-white border-t border-slate-100 flex items-center justify-between text-xs text-slate-600">
+        <div>
+          <span className="font-semibold text-slate-900">{camera?.name || 'Primary Camera'}</span>
+          <span className="text-slate-400 text-[11px] ml-2">{camera?.location || 'Command Sector'}</span>
         </div>
-
-        <div className="flex items-center gap-1.5 flex-wrap">
-          {aiTags.map((tag, idx) => (
-            <span 
-              key={idx}
-              className={`text-[9px] font-mono px-1.5 py-0.5 rounded border ${
-                tag.active 
-                  ? 'bg-cyan-950/60 border-cyan-800/80 text-cyan-300 font-semibold' 
-                  : 'bg-slate-900/60 border-slate-800 text-slate-500'
-              }`}
-            >
-              {tag.label}
-            </span>
-          ))}
+        <div className="flex items-center gap-3 text-[11px] text-slate-500 font-mono">
+          <span>{telemetry?.fps ? `${Math.round(telemetry.fps)} FPS` : '15 FPS'}</span>
+          <span>{telemetry?.resolution || '1280x720'}</span>
         </div>
       </div>
     </div>

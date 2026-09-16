@@ -37,6 +37,18 @@ class CameraCreate(BaseModel):
     stream_url: str = ""
     ai_enabled: bool = True
 
+class CameraUpdate(BaseModel):
+    name: Optional[str] = None
+    location: Optional[str] = None
+    lat: Optional[float] = None
+    lng: Optional[float] = None
+    status: Optional[str] = None
+    fps: Optional[int] = None
+    resolution: Optional[str] = None
+    stream_type: Optional[str] = None
+    stream_url: Optional[str] = None
+    ai_enabled: Optional[bool] = None
+
 class CameraResponse(CameraCreate):
     id: str
 
@@ -52,6 +64,15 @@ class ZoneCreate(BaseModel):
     threat_weight: int = 30
     points_json: List[Dict[str, Any]] = []
     rule_triggers: List[str] = []
+
+class ZoneUpdate(BaseModel):
+    name: Optional[str] = None
+    type: Optional[str] = None
+    color: Optional[str] = None
+    camera_code: Optional[str] = None
+    threat_weight: Optional[int] = None
+    points_json: Optional[List[Dict[str, Any]]] = None
+    rule_triggers: Optional[List[str]] = None
 
 class ZoneResponse(ZoneCreate):
     id: str

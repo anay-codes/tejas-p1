@@ -1,79 +1,90 @@
-import React from 'react';
-import { Play, ShieldAlert, Car, UserCheck, Package, RotateCcw } from 'lucide-react';
-import { simulator } from '../../services/demoSimulator';
+import React, { useState } from 'react';
+import { ShieldAlert, Car, UserCheck, Package, CheckCircle2 } from 'lucide-react';
+import { apiClient } from '../../services/api';
 
-export default function ScenarioBar({ activeScenario = 'infiltration' }) {
-  const scenarios = [
+export default function ScenarioBar() {
+  const [activeTrigger, setActiveTrigger] = useState(null);
+  const [feedback, setFeedback] = useState('');
+
+  const testProtocols = [
     {
-      id: 'infiltration',
-      label: '1. Night Infiltration & Fence Breach',
-      desc: 'Person #27 handoff across 4 cameras -> 82/100 Threat',
+      id: 'intrusion',
+      label: '1. Restricted Perimeter Breach',
+      desc: 'Dispatches real ZONE_INTRUSION event -> Level ALERT',
       icon: ShieldAlert,
-      color: 'hover:border-red-500/50 hover:bg-red-500/10'
+      payload: { title: 'Test: Restricted Perimeter Breach', event_type: 'ZONE_INTRUSION', level: 'ALERT', camera_code: 'CAM-00' }
     },
     {
       id: 'watchlist_vehicle',
-      label: '2. Watchlist Vehicle (ANPR Hit)',
-      desc: 'Black Scorpio MP09AB1234 -> Super-Res & OCR Match',
+      label: '2. Watchlist Plate Intercept',
+      desc: 'Dispatches WATCHLIST_PLATE_MATCH -> Level PRIORITY',
       icon: Car,
-      color: 'hover:border-orange-500/50 hover:bg-orange-500/10'
+      payload: { title: 'Test: Watchlist Vehicle Intercept', event_type: 'WATCHLIST_PLATE_MATCH', level: 'PRIORITY', camera_code: 'CAM-00' }
     },
     {
-      id: 'authorized_guard',
-      label: '3. Friendly Guard Override',
-      desc: 'Facial & RFID match -> -30 Threat Score Override (Secure)',
+      id: 'authorized_patrol',
+      label: '3. Authorized Staff Verification',
+      desc: 'Dispatches AUTHORIZED_FACE_VERIFIED -> Level INFO',
       icon: UserCheck,
-      color: 'hover:border-emerald-500/50 hover:bg-emerald-500/10'
+      payload: { title: 'Test: Patrol Verified', event_type: 'AUTHORIZED_FACE_VERIFIED', level: 'INFO', camera_code: 'CAM-00' }
     },
     {
-      id: 'abandoned_object',
-      label: '4. Abandoned Object (Dwell > 120s)',
-      desc: 'Suspicious unattended item detected in depot yard',
+      id: 'loitering',
+      label: '4. Critical Loitering Alert',
+      desc: 'Dispatches LOITERING incident past dwell threshold -> Level ALERT',
       icon: Package,
-      color: 'hover:border-amber-500/50 hover:bg-amber-500/10'
+      payload: { title: 'Test: Protracted Loitering', event_type: 'LOITERING', level: 'ALERT', camera_code: 'CAM-00' }
     }
   ];
 
+  const handleTrigger = async (proto) => {
+    setActiveTrigger(proto.id);
+    setFeedback('Dispatching...');
+    try {
+      await apiClient.triggerTestIncident(proto.payload);
+      setFeedback(`Dispatched: ${proto.label}`);
+      setTimeout(() => setFeedback(''), 3000);
+    } catch (e) {
+      setFeedback('Failed to trigger');
+    } finally {
+      setActiveTrigger(null);
+    }
+  };
+
   return (
-    <div className="tactical-card p-3 rounded-xl border border-[#1E2D48] mb-4">
+    <div className="tactical-card p-3 rounded-xl border border-[#1E2D48] mb-4 font-mono">
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-2">
-          <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping" />
-          <span className="text-[11px] font-mono font-bold uppercase tracking-wider text-slate-200">
-            SIH Interactive Demonstration Scenarios
+          <span className="w-2 h-2 rounded-full bg-cyan-400" />
+          <span className="text-[11px] font-bold uppercase tracking-wider text-slate-200">
+            Operational Protocol Field Tests
           </span>
         </div>
-        <button
-          onClick={() => simulator.reset()}
-          className="flex items-center gap-1 text-[10px] font-mono text-slate-400 hover:text-white px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 transition-colors"
-          title="Reset Simulation Scenario"
-        >
-          <RotateCcw className="w-3 h-3" />
-          <span>Reset</span>
-        </button>
+        {feedback && (
+          <span className="text-[10px] text-cyan-400 flex items-center gap-1">
+            <CheckCircle2 className="w-3 h-3" />
+            {feedback}
+          </span>
+        )}
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2">
-        {scenarios.map((sc) => {
-          const Icon = sc.icon;
-          const isActive = activeScenario === sc.id;
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2 text-xs">
+        {testProtocols.map((proto) => {
+          const Icon = proto.icon;
           return (
             <button
-              key={sc.id}
-              onClick={() => simulator.triggerScenario(sc.id)}
-              className={`p-2 rounded-lg border text-left transition-all ${
-                isActive
-                  ? 'bg-cyan-500/15 border-cyan-500/60 shadow-lg shadow-cyan-500/10'
-                  : `bg-[#0E1524] border-slate-800/80 ${sc.color}`
-              }`}
+              key={proto.id}
+              onClick={() => handleTrigger(proto)}
+              disabled={activeTrigger !== null}
+              className="p-2 rounded-lg border text-left bg-[#0E1524] border-slate-800 hover:border-cyan-500/50 hover:bg-cyan-500/5 transition-all"
             >
               <div className="flex items-center gap-2 mb-1">
-                <Icon className={`w-3.5 h-3.5 ${isActive ? 'text-cyan-400' : 'text-slate-400'}`} />
-                <span className={`text-xs font-bold font-mono ${isActive ? 'text-cyan-300' : 'text-slate-200'}`}>
-                  {sc.label}
+                <Icon className="w-3.5 h-3.5 text-cyan-400" />
+                <span className="font-bold text-slate-200 text-[11px]">
+                  {proto.label}
                 </span>
               </div>
-              <p className="text-[10px] text-slate-400 line-clamp-1">{sc.desc}</p>
+              <p className="text-[10px] text-slate-400 line-clamp-1">{proto.desc}</p>
             </button>
           );
         })}

@@ -129,14 +129,23 @@ def restore_license_plate(payload: PlateRestoreRequest, db: Session = Depends(ge
     # 4. Restored OCR pass
     restored_ocr_text, conf_after = anpr_service.recognize_plate_text(restored_img)
 
-    chosen_raw = restored_ocr_text if (conf_after >= conf_before and restored_ocr_text) else (raw_ocr_text or restored_ocr_text or payload.plate_number or "")
-    best_conf = max(conf_before, conf_after)
-    if best_conf <= 0.0 and payload.plate_number:
-        # Fallback estimation if OCR returned no text on heavy blur
-        best_conf = round(max(0.20, 0.92 - (payload.intensity * 0.60)), 2)
+    # Pick genuine best read based on measured OCR results
+    if restored_ocr_text and (conf_after >= conf_before or not raw_ocr_text):
+        chosen_raw = restored_ocr_text
+        best_conf = conf_after
+    elif raw_ocr_text:
+        chosen_raw = raw_ocr_text
+        best_conf = conf_before
+    else:
+        chosen_raw = ""
+        best_conf = 0.0
 
     # 5. Normalization
-    normalized = anpr_service.normalize_plate(chosen_raw) if chosen_raw else (payload.plate_number or "UNKNOWN")
+    if chosen_raw:
+        normalized = anpr_service.normalize_plate(chosen_raw)
+    else:
+        # If OCR could not extract characters even after enhancement, report unrecovered
+        normalized = "UNRECOVERED" if not payload.plate_number else anpr_service.normalize_plate(payload.plate_number)
 
     # 6. Watchlist Check against DB
     watchlist_hit, watchlist_entry = anpr_service.check_watchlist(normalized, db_session=db)
@@ -272,7 +281,7 @@ def seed_benchmark_samples(db: Session):
             restored_crop_base64=restored_b64,
             raw_ocr_text=plate_no,
             quality_metrics=assessment,
-            threat_score=85 if "CRITICAL" in status else (70 if "HIGH" in status else 20),
+            threat_score=0,
             track_id=None
         )
         db.add(p)

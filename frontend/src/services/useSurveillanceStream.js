@@ -1,128 +1,103 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+/**
+ * TEJAS Real Surveillance Stream Hook — Phase 2
+ * Consumes real backend WebSocket events (OPERATIONAL_EVENT).
+ * No threat scores. Uses alert_level: INFO | NOTICE | ALERT | PRIORITY.
+ */
+import { useState, useEffect, useCallback } from 'react';
 import { wsService } from './websocket';
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
+
+// Map alert_level to display metadata
+const ALERT_LEVEL_META = {
+  PRIORITY: { color: '#EF4444', badge: 'bg-red-500/10 text-red-400 border-red-500/30', label: 'PRIORITY' },
+  ALERT:    { color: '#F97316', badge: 'bg-orange-500/10 text-orange-400 border-orange-500/30', label: 'ALERT' },
+  NOTICE:   { color: '#F59E0B', badge: 'bg-amber-500/10 text-amber-400 border-amber-500/30', label: 'NOTICE' },
+  INFO:     { color: '#10B981', badge: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30', label: 'MONITORING' },
+};
+
+function getAlertMeta(alertLevel) {
+  return ALERT_LEVEL_META[alertLevel] || ALERT_LEVEL_META.INFO;
+}
 
 export function useSurveillanceStream() {
   const [alerts, setAlerts] = useState([]);
   const [incidents, setIncidents] = useState([]);
   const [events, setEvents] = useState([]);
-  const [activeThreat, setActiveThreat] = useState({
-    score: 10,
-    severity: 'LOW',
-    severityColor: '#10B981',
-    badgeClass: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30',
+  const [activeStatus, setActiveStatus] = useState({
+    alert_level: 'INFO',
+    alert_reason: 'MONITORING IDLE',
     entity: 'MONITORING IDLE',
-    factors: []
+    authorization_state: 'UNKNOWN',
+    ...getAlertMeta('INFO'),
   });
   const [isConnected, setIsConnected] = useState(false);
   const [newAlertCount, setNewAlertCount] = useState(0);
   const [lastAnprDetection, setLastAnprDetection] = useState(null);
-
-  const getSeverityMeta = (score, sev) => {
-    if (score >= 80 || sev === 'CRITICAL') {
-      return {
-        color: '#EF4444',
-        badge: 'bg-red-500/10 text-red-400 border-red-500/30'
-      };
-    }
-    if (score >= 60 || sev === 'HIGH') {
-      return {
-        color: '#F97316',
-        badge: 'bg-orange-500/10 text-orange-400 border-orange-500/30'
-      };
-    }
-    if (score >= 30 || sev === 'MEDIUM') {
-      return {
-        color: '#F59E0B',
-        badge: 'bg-amber-500/10 text-amber-400 border-amber-500/30'
-      };
-    }
-    return {
-      color: '#10B981',
-      badge: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
-    };
-  };
+  const [cameraStatuses, setCameraStatuses] = useState({});
 
   const fetchInitialData = useCallback(async () => {
     try {
       const [alertsRes, incRes, evtRes] = await Promise.all([
         fetch(`${API_BASE}/alerts`),
         fetch(`${API_BASE}/incidents`),
-        fetch(`${API_BASE}/events?limit=30`)
+        fetch(`${API_BASE}/events?limit=30`),
       ]);
 
-      if (alertsRes.ok) {
-        const data = await alertsRes.json();
-        setAlerts(data);
-      }
+      if (alertsRes.ok) setAlerts(await alertsRes.json());
       if (incRes.ok) {
         const data = await incRes.json();
         setIncidents(data);
         if (data.length > 0) {
           const latest = data[0];
-          const meta = getSeverityMeta(latest.threat_score, latest.severity);
-          setActiveThreat({
-            score: latest.threat_score,
-            severity: latest.severity,
-            severityColor: meta.color,
-            badgeClass: meta.badge,
-            entity: latest.target_entity,
-            factors: latest.threat_factors || []
+          const level = latest.severity || 'INFO'; // severity repurposed as alert_level in Phase 2
+          const meta = getAlertMeta(level);
+          setActiveStatus({
+            alert_level: level,
+            alert_reason: latest.title || '',
+            entity: latest.target_entity || 'TRACKED ENTITY',
+            authorization_state: latest.threat_factors?.[0]?.authorization_state || 'UNKNOWN',
+            ...meta,
           });
         }
       }
-      if (evtRes.ok) {
-        const data = await evtRes.json();
-        setEvents(data);
-      }
+      if (evtRes.ok) setEvents(await evtRes.json());
     } catch (err) {
-      console.warn("Surveillance stream REST sync warning:", err);
+      console.warn('Surveillance REST sync warning:', err);
     }
   }, []);
 
   useEffect(() => {
     fetchInitialData();
-
-    // Ensure WebSocket is connected
     wsService.connect();
 
-    // Subscribe to live WebSocket messages
     const unsubscribe = wsService.subscribe((msg) => {
       setIsConnected(true);
 
-      if (msg.type === 'CORRELATED_EVENT') {
-        const { event, correlation, alert, incident } = msg;
+      // Phase 2 event type
+      if (msg.type === 'OPERATIONAL_EVENT') {
+        const { event, alert, incident } = msg;
 
-        // 1. Update Latest Events
         if (event) {
           setEvents(prev => [event, ...prev.slice(0, 49)]);
-        }
-
-        // 2. Update Active Threat Assessment
-        if (correlation) {
-          const meta = getSeverityMeta(correlation.threat_score, correlation.severity);
-          setActiveThreat({
-            score: correlation.threat_score,
-            severity: correlation.severity,
-            severityColor: meta.color,
-            badgeClass: meta.badge,
-            entity: correlation.entity_id || 'TRACKED ENTITY',
-            factors: correlation.factors || []
+          const meta = getAlertMeta(event.alert_level || 'INFO');
+          setActiveStatus({
+            alert_level: event.alert_level || 'INFO',
+            alert_reason: event.alert_reason || '',
+            entity: event.entity_id || 'TRACKED ENTITY',
+            authorization_state: event.authorization_state || 'UNKNOWN',
+            ...meta,
           });
         }
 
-        // 3. Prepend New Alert if generated
         if (alert) {
           setAlerts(prev => {
-            const exists = prev.some(a => a.id === alert.id);
-            if (exists) return prev;
+            if (prev.some(a => a.id === alert.id)) return prev;
+            setNewAlertCount(c => c + 1);
             return [alert, ...prev];
           });
-          setNewAlertCount(c => c + 1);
         }
 
-        // 4. Update Incidents
         if (incident) {
           setIncidents(prev => {
             const idx = prev.findIndex(i => i.id === incident.id);
@@ -134,26 +109,73 @@ export function useSurveillanceStream() {
             return [incident, ...prev];
           });
         }
-      } else if (msg.type === 'ANPR_DETECTION') {
-        if (msg.data) {
-          setLastAnprDetection(msg.data);
+      }
+
+      // Phase 1 legacy type (still handled for backward compatibility)
+      if (msg.type === 'CORRELATED_EVENT') {
+        const { event, alert, incident } = msg;
+        if (event) setEvents(prev => [event, ...prev.slice(0, 49)]);
+        if (alert) {
+          setAlerts(prev => {
+            if (prev.some(a => a.id === alert.id)) return prev;
+            return [alert, ...prev];
+          });
         }
+        if (incident) {
+          setIncidents(prev => {
+            const idx = prev.findIndex(i => i.id === incident.id);
+            if (idx >= 0) {
+              const u = [...prev];
+              u[idx] = incident;
+              return u;
+            }
+            return [incident, ...prev];
+          });
+        }
+      }
+
+      if (msg.type === 'ANPR_DETECTION' && msg.data) {
+        setLastAnprDetection(msg.data);
+      }
+
+      if (msg.type === 'NEW_INCIDENT' && msg.incident) {
+        setIncidents(prev => {
+          if (prev.some(i => i.id === msg.incident.id)) return prev;
+          return [msg.incident, ...prev];
+        });
+      }
+
+      if (msg.type === 'CAMERA_OFFLINE' || msg.type === 'CAMERA_ONLINE') {
+        setCameraStatuses(prev => ({
+          ...prev,
+          [msg.camera_id]: msg.type === 'CAMERA_ONLINE' ? 'ONLINE' : 'OFFLINE',
+        }));
       }
     });
 
-    return () => {
-      unsubscribe();
-    };
+    return () => unsubscribe();
   }, [fetchInitialData]);
+
+  // Backward-compatible activeThreat shape (for components that still use old field names)
+  const activeThreat = {
+    ...activeStatus,
+    score: 0,                           // Deprecated — always 0 in Phase 2
+    severity: activeStatus.alert_level, // Repurposed
+    severityColor: activeStatus.color,
+    badgeClass: activeStatus.badge,
+    factors: [],
+  };
 
   return {
     alerts,
     incidents,
     events,
     activeThreat,
+    activeStatus,
     isConnected,
     newAlertCount,
     lastAnprDetection,
-    refetch: fetchInitialData
+    cameraStatuses,
+    refetch: fetchInitialData,
   };
 }

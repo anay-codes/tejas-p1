@@ -52,7 +52,21 @@ class Settings(BaseModel):
     TARGET_INFERENCE_FPS: int = int(os.getenv("TARGET_INFERENCE_FPS", "15"))
     INFERENCE_WIDTH: int = int(os.getenv("INFERENCE_WIDTH", "640"))
     INFERENCE_HEIGHT: int = int(os.getenv("INFERENCE_HEIGHT", "480"))
-    ENABLE_ASYNC_PROTECTION: bool = os.getenv("ENABLE_ASYNC_PROTECTION", "false").lower() in ("true", "1", "yes")
+    ENABLE_ASYNC_PROTECTION: bool = os.getenv("ENABLE_ASYNC_PROTECTION", "true").lower() in ("true", "1", "yes")
+
+    # Auth credential overrides (set in .env, never hardcode)
+    ADMIN_USERNAME: str = os.getenv("ADMIN_USERNAME", "admin")
+    ADMIN_PASSWORD: str = os.getenv("ADMIN_PASSWORD", "tejas_admin_2026")
+    OPERATOR_USERNAME: str = os.getenv("OPERATOR_USERNAME", "operator")
+    OPERATOR_PASSWORD: str = os.getenv("OPERATOR_PASSWORD", "tejas_op_2026")
+
+    # Loitering threshold (seconds)
+    LOITER_THRESHOLD_SECONDS: float = float(os.getenv("LOITER_THRESHOLD_SECONDS", "10.0"))
+
+    # Night hours for night-movement context
+    NIGHT_START_HOUR: int = int(os.getenv("NIGHT_START_HOUR", "20"))
+    NIGHT_END_HOUR: int = int(os.getenv("NIGHT_END_HOUR", "6"))
+    LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
 
     def get_resolved_video_source(self):
         src = (self.VIDEO_SOURCE or "webcam").lower().strip()

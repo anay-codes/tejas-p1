@@ -1,13 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import { Shield, Radio, Play, Pause, RotateCcw, Bell, User, Clock, AlertTriangle } from 'lucide-react';
+import { Shield, Bell, User, Clock, LogOut } from 'lucide-react';
+import { useNavigate, Link } from 'react-router-dom';
+import { authService } from '../../services/auth';
 
 export default function Navbar({ 
   isConnected = true, 
   activeIncidentsCount = 0, 
-  currentScore = 10,
-  severity = 'LOW'
+  severity = 'INFO'
 }) {
+  const navigate = useNavigate();
   const [timeStr, setTimeStr] = useState('');
+  const [currentUser, setCurrentUser] = useState(authService.getUser());
 
   useEffect(() => {
     const updateTime = () => {
@@ -16,104 +19,117 @@ export default function Navbar({
     };
     updateTime();
     const interval = setInterval(updateTime, 1000);
-    return () => clearInterval(interval);
+
+    const handleAuthChange = () => {
+      setCurrentUser(authService.getUser());
+    };
+    window.addEventListener('tejas_auth_changed', handleAuthChange);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('tejas_auth_changed', handleAuthChange);
+    };
   }, []);
 
-  const getSeverityStyle = (score, sev) => {
-    if (score >= 80 || sev === 'CRITICAL') {
-      return { bg: 'bg-red-500/15', border: 'border-red-500/40', text: 'text-red-400', label: 'CRITICAL ALERT' };
-    }
-    if (score >= 60 || sev === 'HIGH') {
-      return { bg: 'bg-orange-500/15', border: 'border-orange-500/40', text: 'text-orange-400', label: 'HIGH RISK' };
-    }
-    if (score >= 30 || sev === 'MEDIUM') {
-      return { bg: 'bg-amber-500/10', border: 'border-amber-500/30', text: 'text-amber-400', label: 'MEDIUM ADVISORY' };
-    }
-    return { bg: 'bg-emerald-500/10', border: 'border-emerald-500/30', text: 'text-emerald-400', label: 'SECURE / NORMAL' };
+  const handleLogout = () => {
+    authService.logout();
+    navigate('/login');
   };
 
-  const sevStyle = getSeverityStyle(currentScore, severity);
+  const getSeverityBadge = (sev) => {
+    const norm = (sev || '').toUpperCase();
+    if (norm === 'PRIORITY' || norm === 'CRITICAL') {
+      return { bg: 'bg-red-50 text-red-700 border-red-200', dot: 'bg-red-600', label: 'Priority Alert' };
+    }
+    if (norm === 'ALERT' || norm === 'HIGH') {
+      return { bg: 'bg-orange-50 text-orange-700 border-orange-200', dot: 'bg-orange-500', label: 'Operational Alert' };
+    }
+    if (norm === 'NOTICE' || norm === 'MEDIUM') {
+      return { bg: 'bg-amber-50 text-amber-800 border-amber-200', dot: 'bg-amber-500', label: 'Notice' };
+    }
+    return { bg: 'bg-slate-50 text-slate-700 border-slate-200', dot: 'bg-emerald-500', label: 'Normal / Secure' };
+  };
+
+  const sevBadge = getSeverityBadge(severity);
+  const roleName = (currentUser?.role || 'OPERATOR').toUpperCase();
+  const displayName = currentUser?.full_name || currentUser?.username || 'Duty Operator';
 
   return (
-    <header className="h-16 bg-[#080E1B]/95 backdrop-blur-md border-b border-[#1E2D48] px-4 flex items-center justify-between z-30 sticky top-0 shadow-lg">
-      {/* Brand & Tagline */}
+    <header className="h-14 bg-white border-b border-slate-200 px-5 flex items-center justify-between z-30 sticky top-0 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
+      {/* Brand */}
       <div className="flex items-center gap-3">
-        <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-cyan-500/20 to-blue-600/30 border border-cyan-500/40 flex items-center justify-center shadow-lg shadow-cyan-500/10">
-          <Shield className="w-5 h-5 text-cyan-400" />
-        </div>
-        <div>
-          <div className="flex items-center gap-2">
-            <span className="font-extrabold text-xl tracking-wider text-white font-mono">TEJAS</span>
-            <span className="text-[10px] uppercase tracking-widest font-bold px-2 py-0.5 rounded bg-cyan-500/10 text-cyan-400 border border-cyan-500/30 font-mono">
-              COMMAND & CONTROL
-            </span>
+        <Link to="/dashboard" className="flex items-center gap-2.5 group">
+          <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center text-white shadow-sm transition-transform group-hover:scale-105">
+            <Shield className="w-4 h-4" />
           </div>
-          <p className="text-[11px] text-slate-400 hidden sm:block tracking-wide">
-            Threat Evaluation & Joint AI Surveillance • <span className="text-cyan-400/90 italic">Border Intelligence Platform</span>
-          </p>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="font-bold text-base tracking-tight text-slate-900 font-sans">TEJAS</span>
+              <span className="text-[10px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200">
+                Surveillance Core
+              </span>
+            </div>
+          </div>
+        </Link>
+      </div>
+
+      {/* Operational Status (Calm, Informative) */}
+      <div className="hidden md:flex items-center gap-4 text-xs">
+        {/* Connection Status */}
+        <div className="flex items-center gap-1.5 text-slate-600 font-medium">
+          <span className={`w-2 h-2 rounded-full ${isConnected ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+          <span className="text-slate-500 text-[11px]">{isConnected ? 'System Connected' : 'Connecting Network...'}</span>
+        </div>
+
+        {/* Operational Status */}
+        <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs font-medium ${sevBadge.bg}`}>
+          <span className={`w-1.5 h-1.5 rounded-full ${sevBadge.dot}`} />
+          <span>{sevBadge.label}</span>
+        </div>
+
+        {/* System Clock */}
+        <div className="flex items-center gap-1.5 text-slate-500 text-[11px] font-mono pl-3 border-l border-slate-200">
+          <Clock className="w-3.5 h-3.5 text-slate-400" />
+          <span>{timeStr}</span>
         </div>
       </div>
 
-      {/* Operational Status HUD */}
-      <div className="hidden lg:flex items-center gap-3 text-xs font-mono">
-        {/* Backend & WebSocket Health Indicator */}
-        <div className={`flex items-center gap-2 px-3 py-1 rounded-md border ${
-          isConnected 
-            ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' 
-            : 'bg-amber-500/10 border-amber-500/30 text-amber-400'
-        }`}>
-          <span className="relative flex h-2 w-2">
-            {isConnected && <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>}
-            <span className={`relative inline-flex rounded-full h-2 w-2 ${isConnected ? 'bg-emerald-500' : 'bg-amber-500'}`}></span>
-          </span>
-          <span className="font-semibold tracking-wider">
-            {isConnected ? 'LIVE TELEMETRY ACTIVE' : 'CONNECTING SEC-NET'}
-          </span>
-        </div>
-
-        {/* Real Clock */}
-        <div className="flex items-center gap-2 px-3 py-1 rounded-md bg-[#0F182A] border border-[#1E2D48] text-slate-300">
-          <Clock className="w-3.5 h-3.5 text-cyan-400" />
-          <span className="font-bold">{timeStr}</span>
-        </div>
-
-        {/* Threat Level Meter */}
-        <div className={`flex items-center gap-2 px-3 py-1 rounded-md border ${sevStyle.bg} ${sevStyle.border} ${sevStyle.text}`}>
-          <AlertTriangle className="w-3.5 h-3.5" />
-          <span className="font-bold">THREAT: {currentScore}/100</span>
-          <span className="text-[10px] uppercase px-1.5 py-0.2 rounded bg-black/40 border border-current">
-            {sevStyle.label}
-          </span>
-        </div>
-      </div>
-
-      {/* Incidents & Operator Profile */}
+      {/* Right Controls: Incidents & User Profile */}
       <div className="flex items-center gap-3">
-        {/* Active Incidents Quick Badge */}
-        <a
-          href="/incidents"
-          className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-[#0F182A] hover:bg-[#16233B] border border-[#1E2D48] hover:border-cyan-500/40 transition-all font-mono text-xs"
+        {/* Incidents Quick Link */}
+        <Link
+          to="/incidents"
+          className="flex items-center gap-2 px-2.5 py-1.5 rounded-md text-xs font-medium text-slate-700 hover:bg-slate-100 border border-slate-200 transition-colors"
+          title="Active Incidents"
         >
-          <Bell className="w-3.5 h-3.5 text-cyan-400" />
-          <span className="text-slate-300 hidden sm:inline">INCIDENTS</span>
-          <span className={`px-1.5 py-0.2 text-[10px] font-bold rounded ${
-            activeIncidentsCount > 0 
-              ? 'bg-red-500/20 text-red-400 border border-red-500/40 animate-pulse' 
-              : 'bg-slate-800 text-slate-400'
-          }`}>
-            {activeIncidentsCount}
-          </span>
-        </a>
+          <Bell className="w-3.5 h-3.5 text-slate-500" />
+          <span className="hidden sm:inline text-slate-600">Incidents</span>
+          {activeIncidentsCount > 0 ? (
+            <span className="px-1.5 py-0.2 text-[10px] font-bold rounded-full bg-red-100 text-red-700 border border-red-200">
+              {activeIncidentsCount}
+            </span>
+          ) : (
+            <span className="text-[10px] text-slate-400">0</span>
+          )}
+        </Link>
 
-        {/* Operator Identity */}
-        <div className="flex items-center gap-2 pl-2 border-l border-[#1E2D48]">
-          <div className="w-8 h-8 rounded-full bg-cyan-950/60 border border-cyan-500/40 flex items-center justify-center text-cyan-400 font-bold text-xs shadow-inner">
-            <User className="w-4 h-4" />
+        {/* User Identity & Logout */}
+        <div className="flex items-center gap-2 pl-3 border-l border-slate-200">
+          <div className="w-7 h-7 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-600 text-xs font-medium">
+            <User className="w-3.5 h-3.5" />
           </div>
-          <div className="hidden xl:block text-left text-xs">
-            <div className="font-semibold text-slate-200 leading-tight">Cmdr. R. Verma</div>
-            <div className="text-[10px] text-cyan-400 font-mono">SECTOR COMMANDER • L4</div>
+          <div className="hidden lg:block text-left text-xs leading-tight">
+            <div className="font-semibold text-slate-800">{displayName}</div>
+            <div className="text-[10px] text-slate-500">{roleName}</div>
           </div>
+
+          <button
+            onClick={handleLogout}
+            title="Sign out of session"
+            className="p-1.5 ml-1 rounded-md text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+          >
+            <LogOut className="w-4 h-4" />
+          </button>
         </div>
       </div>
     </header>

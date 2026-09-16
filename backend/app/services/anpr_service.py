@@ -274,16 +274,16 @@ class ANPRService:
         applied_enhancements = []
         h, w = restored.shape[:2]
 
-        # 1. Super-Resolution / Upscaling if low resolution
+        # 1. Spatial Upscaling via Lanczos Sinc Interpolation if low resolution
         if h < 80 or w < 240:
             scale = 2.0 if (h >= 45 and w >= 130) else 3.0
             new_w, new_h = int(w * scale), int(h * scale)
             restored = cv2.resize(restored, (new_w, new_h), interpolation=cv2.INTER_LANCZOS4)
-            applied_enhancements.append(f"Super-Resolution Lanczos ({int(scale)}x Upscale)")
+            applied_enhancements.append(f"Lanczos Sinc Upsampling ({int(scale)}x)")
 
-        # 2. Edge-Preserving Bilateral Filter (Removes noise & JPEG blockiness)
+        # 2. Edge-Preserving Bilateral Filter (Removes noise & sensor grain)
         restored = cv2.bilateralFilter(restored, d=7, sigmaColor=45, sigmaSpace=45)
-        applied_enhancements.append("Bilateral Noise & Compression Filter")
+        applied_enhancements.append("Bilateral Noise & Smoothing Filter")
 
         # 3. Adaptive CLAHE Contrast Normalization in LAB Luminance Channel
         lab = cv2.cvtColor(restored, cv2.COLOR_BGR2LAB)
@@ -298,7 +298,7 @@ class ANPRService:
         if "MOTION_BLUR" in assessment.get("issues", []) or "GAUSSIAN_BLUR" in assessment.get("issues", []):
             gaussian = cv2.GaussianBlur(restored, (0, 0), 2.0)
             restored = cv2.addWeighted(restored, 1.65, gaussian, -0.65, 0)
-            applied_enhancements.append("Unsharp Masking Neural Deblur Filter")
+            applied_enhancements.append("Directional Unsharp Deblur Filter")
         else:
             gaussian = cv2.GaussianBlur(restored, (0, 0), 1.5)
             restored = cv2.addWeighted(restored, 1.35, gaussian, -0.35, 0)
@@ -519,11 +519,11 @@ class ANPRService:
         # 8. Watchlist Matching
         watchlist_hit, watchlist_entry = self.check_watchlist(normalized_plate)
         watchlist_status = "CLEAR"
-        threat_score = 15
+        watchlist_alert_level = "INFO"
         if watchlist_hit and watchlist_entry:
             t_level = watchlist_entry.get("threat_level", "MEDIUM")
-            watchlist_status = f"{t_level}_HIT"
-            threat_score = 85 if t_level == "CRITICAL" else (70 if t_level == "HIGH" else 45)
+            watchlist_status = f"WATCHLIST_HIT"
+            watchlist_alert_level = "PRIORITY"
 
         # 9. Encode Images for UI presentation
         raw_b64 = encode_image_to_base64(raw_crop)
@@ -550,7 +550,7 @@ class ANPRService:
                 restored_crop_base64=restored_b64,
                 raw_ocr_text=chosen_raw_text,
                 quality_metrics=assessment,
-                threat_score=threat_score,
+                threat_score=0,
                 track_id=track_id
             )
             db.add(plate_record)
@@ -573,7 +573,7 @@ class ANPRService:
             "watchlist_match": watchlist_hit,
             "watchlist_status": watchlist_status,
             "watchlist_entry": watchlist_entry,
-            "threat_score": threat_score,
+            "watchlist_alert_level": watchlist_alert_level,
             "raw_crop_base64": raw_b64,
             "restored_crop_base64": restored_b64,
             "camera_id": camera_id,

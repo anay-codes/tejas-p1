@@ -30,31 +30,48 @@ class VideoSource:
                 cam_idx = int(source)
 
             if is_int:
-                if sys.platform.startswith("win"):
-                    cap = cv2.VideoCapture(cam_idx, cv2.CAP_DSHOW)
-                else:
-                    cap = cv2.VideoCapture(cam_idx)
+                try:
+                    if sys.platform.startswith("win"):
+                        cap = cv2.VideoCapture(cam_idx, cv2.CAP_DSHOW)
+                    else:
+                        cap = cv2.VideoCapture(cam_idx)
+                except (cv2.error, Exception) as cap_err:
+                    logger.warning(f"VideoCapture({cam_idx}) initialization error: {cap_err}")
+                    return None
             else:
                 source_str = str(source).strip()
-                if source_str.startswith("rtsp://") or source_str.startswith("rtsps://"):
-                    os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp|fflags;nobuffer|max_delay;500000"
-                    cap = cv2.VideoCapture(source_str, cv2.CAP_FFMPEG)
-                else:
-                    cap = cv2.VideoCapture(source_str)
+                try:
+                    if source_str.startswith("rtsp://") or source_str.startswith("rtsps://"):
+                        os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp|fflags;nobuffer|max_delay;500000"
+                        cap = cv2.VideoCapture(source_str, cv2.CAP_FFMPEG)
+                    else:
+                        cap = cv2.VideoCapture(source_str)
+                except (cv2.error, Exception) as cap_err:
+                    logger.warning(f"VideoCapture('{source_str}') initialization error: {cap_err}")
+                    return None
 
             if cap is not None and cap.isOpened():
                 if width and height:
-                    cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
-                    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
-                cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                    try:
+                        cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+                        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+                    except Exception:
+                        pass
+                try:
+                    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                except Exception:
+                    pass
                 return cap
             else:
                 if cap is not None:
-                    cap.release()
+                    try:
+                        cap.release()
+                    except Exception:
+                        pass
                 return None
 
-        except Exception as e:
-            logger.error(f"Error opening VideoSource '{source}': {e}", exc_info=True)
+        except (cv2.error, Exception) as e:
+            logger.error(f"Error opening VideoSource '{source}': {e}")
             if cap is not None:
                 try:
                     cap.release()

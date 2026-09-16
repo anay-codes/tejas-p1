@@ -8,13 +8,10 @@ import {
   CheckCircle2, 
   Clock, 
   Search, 
-  Radio,
-  Zap,
-  Play,
-  RefreshCw,
-  Camera,
-  Check,
-  Eye
+  Zap, 
+  RefreshCw, 
+  Camera, 
+  Eye 
 } from 'lucide-react';
 import { apiClient } from '../services/api';
 import { wsService } from '../services/websocket';
@@ -26,8 +23,6 @@ export default function Incidents() {
   const [filterSeverity, setFilterSeverity] = useState('ALL');
   const [searchQuery, setSearchQuery] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [isTriggering, setIsTriggering] = useState(false);
-  const [triggerFeedback, setTriggerFeedback] = useState(null);
 
   const fetchIncidents = async () => {
     setIsLoading(true);
@@ -44,7 +39,6 @@ export default function Incidents() {
   useEffect(() => {
     fetchIncidents();
 
-    // Subscribe to real-time incident broadcasts
     const unsubscribe = wsService.subscribe((msg) => {
       if (msg.type === 'NEW_INCIDENT' || msg.type === 'INCIDENT_UPDATED' || msg.type === 'CORRELATED_EVENT') {
         fetchIncidents();
@@ -57,7 +51,7 @@ export default function Incidents() {
   }, [filterStatus, filterSeverity]);
 
   const handleQuickStatus = async (e, incidentId, targetStatus) => {
-    e.stopPropagation(); // prevent row navigation
+    e.stopPropagation();
     try {
       await apiClient.updateIncidentStatus(
         incidentId, 
@@ -69,27 +63,6 @@ export default function Incidents() {
       await fetchIncidents();
     } catch (err) {
       console.error("Failed to update status:", err);
-    }
-  };
-
-  const handleTriggerTest = async (targetType = "PERSON") => {
-    setIsTriggering(true);
-    setTriggerFeedback(null);
-    try {
-      const res = await apiClient.triggerTestIncident({
-        camera_id: "CAM-00",
-        target_type: targetType,
-        threat_scenario: targetType === "PERSON" ? "RESTRICTED_ZONE_ENTRY" : "WATCHLIST_VEHICLE"
-      });
-      if (res && res.success) {
-        setTriggerFeedback(`Generated ${res.incident_id} (${res.title}) with evidence`);
-        await fetchIncidents();
-        setTimeout(() => setTriggerFeedback(null), 5000);
-      }
-    } catch (err) {
-      console.error("Failed to trigger test incident:", err);
-    } finally {
-      setIsTriggering(false);
     }
   };
 
@@ -105,80 +78,56 @@ export default function Incidents() {
            id.toLowerCase().includes(q);
   });
 
+  const getAlertLevel = (inc) => {
+    const sev = (inc.severity || '').toUpperCase();
+    if (sev === 'CRITICAL' || inc.threat_score >= 80) return { label: 'PRIORITY', style: 'bg-red-50 text-red-700 border-red-200' };
+    if (sev === 'HIGH' || inc.threat_score >= 60) return { label: 'ALERT', style: 'bg-orange-50 text-orange-700 border-orange-200' };
+    if (sev === 'MEDIUM' || inc.threat_score >= 30) return { label: 'NOTICE', style: 'bg-amber-50 text-amber-700 border-amber-200' };
+    return { label: 'INFO', style: 'bg-slate-100 text-slate-700 border-slate-200' };
+  };
+
   return (
-    <div className="space-y-5 p-4 max-w-[1920px] mx-auto">
-      {/* Top Header Card */}
-      <div className="tactical-card p-4 rounded-xl border border-[#1E2D48] flex flex-col md:flex-row md:items-center justify-between gap-4 bg-gradient-to-r from-[#0B1220] via-[#0D182E] to-[#0B1220]">
+    <div className="space-y-5">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2.5">
-            <div className="p-1.5 rounded-lg bg-red-500/20 border border-red-500/40 text-red-400">
-              <AlertOctagon className="w-5 h-5" />
-            </div>
-            <h1 className="text-base font-bold uppercase tracking-wider text-slate-100 font-mono">
-              Operational Incident Management & Evidence Dossier
-            </h1>
-          </div>
-          <p className="text-xs text-slate-400 mt-1 pl-9 font-mono">
-            Correlated threat incidents automatically created from perimeter intrusions, watchlist matches, and multi-camera transitions with physical evidence capture.
+          <h1 className="text-xl font-bold text-slate-900 tracking-tight flex items-center gap-2">
+            <AlertOctagon className="w-5 h-5 text-red-600" />
+            Security Incidents & Operations Triage
+          </h1>
+          <p className="text-sm text-slate-500 mt-0.5">
+            Correlated incidents automatically synthesized from perimeter intrusions, watchlist matches, and entity tracking.
           </p>
         </div>
 
-        {/* Action Controls & Test Triggers */}
-        <div className="flex flex-wrap items-center gap-2.5">
-          <button
-            onClick={() => handleTriggerTest("PERSON")}
-            disabled={isTriggering}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-600/80 hover:bg-red-500 text-white font-mono text-xs font-bold shadow-lg shadow-red-600/20 transition-all"
-          >
-            <Zap className="w-3.5 h-3.5" />
-            <span>{isTriggering ? 'Triggering...' : 'Trigger Test Intrusion'}</span>
-          </button>
-
-          <button
-            onClick={() => handleTriggerTest("VEHICLE")}
-            disabled={isTriggering}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-orange-600/80 hover:bg-orange-500 text-white font-mono text-xs font-bold shadow-lg shadow-orange-600/20 transition-all"
-          >
-            <Zap className="w-3.5 h-3.5" />
-            <span>Watchlist Hit</span>
-          </button>
-
+        {/* Actions */}
+        <div className="flex items-center gap-2.5">
           <button
             onClick={fetchIncidents}
             disabled={isLoading}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 font-mono text-xs font-semibold border border-slate-700 transition-all"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 text-xs font-medium shadow-sm transition-colors"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
-            <span>Refresh</span>
+            <span>Refresh Incidents</span>
           </button>
         </div>
       </div>
 
-      {triggerFeedback && (
-        <div className="p-3 rounded-lg bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-xs font-mono flex items-center justify-between">
-          <span className="flex items-center gap-2">
-            <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-            <strong>System Notification:</strong> {triggerFeedback}
-          </span>
-          <span className="text-[10px] text-emerald-400/80">PERSISTED TO DATABASE</span>
-        </div>
-      )}
-
       {/* Filter & Search Bar */}
-      <div className="tactical-card p-3 rounded-xl border border-[#1E2D48] flex flex-wrap items-center justify-between gap-3">
+      <div className="bg-white rounded-lg border border-slate-200 shadow-sm p-3 flex flex-wrap items-center justify-between gap-3 text-xs">
         {/* Status Filter Tabs */}
-        <div className="flex flex-wrap items-center gap-1 text-xs font-mono">
-          <span className="text-slate-500 text-[11px] mr-2 flex items-center gap-1">
-            <Filter className="w-3.5 h-3.5" /> STATUS:
+        <div className="flex flex-wrap items-center gap-1">
+          <span className="text-slate-400 text-xs mr-2 flex items-center gap-1">
+            <Filter className="w-3.5 h-3.5" /> Status:
           </span>
           {['ALL', 'NEW', 'ACKNOWLEDGED', 'INVESTIGATING', 'RESOLVED'].map((st) => (
             <button
               key={st}
               onClick={() => setFilterStatus(st)}
-              className={`px-2.5 py-1 rounded text-xs font-semibold transition-all ${
+              className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
                 filterStatus === st
-                  ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 font-bold'
-                  : 'text-slate-400 hover:text-slate-200 border border-transparent'
+                  ? 'bg-blue-50 text-blue-700 border border-blue-200 font-semibold'
+                  : 'text-slate-600 hover:text-slate-900 border border-transparent hover:bg-slate-50'
               }`}
             >
               {st}
@@ -187,118 +136,106 @@ export default function Incidents() {
         </div>
 
         {/* Severity & Search Controls */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2.5">
           <div className="relative">
-            <Search className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
             <input
               type="text"
               placeholder="Search by ID, entity, camera..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-8 pr-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-slate-200 text-xs font-mono focus:outline-none focus:border-cyan-400 w-56"
+              className="input-clean pl-8 py-1 text-xs w-56"
             />
           </div>
 
           <select
             value={filterSeverity}
             onChange={(e) => setFilterSeverity(e.target.value)}
-            className="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-slate-200 text-xs font-mono"
+            className="input-clean py-1 text-xs"
           >
-            <option value="ALL">All Severities</option>
-            <option value="CRITICAL">Critical</option>
-            <option value="HIGH">High</option>
-            <option value="MEDIUM">Medium</option>
-            <option value="LOW">Low</option>
+            <option value="ALL">All Levels</option>
+            <option value="CRITICAL">Priority</option>
+            <option value="HIGH">Alert</option>
+            <option value="MEDIUM">Notice</option>
+            <option value="LOW">Info</option>
           </select>
         </div>
       </div>
 
       {/* Incidents Table */}
-      <div className="tactical-card rounded-xl border border-[#1E2D48] overflow-hidden">
+      <div className="bg-white rounded-lg border border-slate-200 shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse font-mono">
+          <table className="w-full text-left border-collapse">
             <thead>
-              <tr className="bg-[#0E1524] border-b border-[#1E2D48] text-[11px] uppercase text-slate-400">
-                <th className="py-3 px-4">INCIDENT ID / TITLE</th>
-                <th className="py-3 px-4">TARGET ENTITY</th>
-                <th className="py-3 px-4">THREAT SCORE</th>
-                <th className="py-3 px-4">SEVERITY</th>
-                <th className="py-3 px-4">PRIMARY CAMERA</th>
-                <th className="py-3 px-4">LIFECYCLE STATUS</th>
-                <th className="py-3 px-4">TIMESTAMP</th>
-                <th className="py-3 px-4 text-right">OPERATOR ACTIONS</th>
+              <tr className="bg-slate-50 border-b border-slate-200 text-[11px] uppercase text-slate-500">
+                <th className="py-3 px-4 font-semibold">Incident / Description</th>
+                <th className="py-3 px-4 font-semibold">Target Entity</th>
+                <th className="py-3 px-4 font-semibold">Operational Level</th>
+                <th className="py-3 px-4 font-semibold">Primary Camera</th>
+                <th className="py-3 px-4 font-semibold">Status</th>
+                <th className="py-3 px-4 font-semibold">Timestamp</th>
+                <th className="py-3 px-4 text-right font-semibold">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-[#1E2D48] text-xs">
+            <tbody className="divide-y divide-slate-100 text-xs">
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="py-12 text-center text-slate-500">
-                    <ShieldAlert className="w-8 h-8 text-slate-600 mx-auto mb-2" />
-                    <p>No incidents match the active filters.</p>
-                    <p className="text-[11px] text-slate-600 mt-1">
-                      Click "Trigger Test Intrusion" above to generate a live operational incident.
+                  <td colSpan={7} className="py-12 text-center text-slate-500">
+                    <ShieldAlert className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                    <p className="font-medium text-slate-700">No active incidents matching filters.</p>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      Operational breaches and watchlist hits will be listed here in real-time.
                     </p>
                   </td>
                 </tr>
               ) : (
                 filtered.map((inc) => {
-                  const isCritical = inc.severity === 'CRITICAL' || inc.threat_score >= 80;
-                  const isHigh = inc.severity === 'HIGH' || inc.threat_score >= 60;
+                  const alertLevel = getAlertLevel(inc);
                   return (
                     <tr 
                       key={inc.id} 
                       onClick={() => navigate(`/incidents/${inc.id}`)}
-                      className="hover:bg-slate-800/40 cursor-pointer transition-colors group"
+                      className="hover:bg-slate-50/80 cursor-pointer transition-colors group"
                     >
                       <td className="py-3.5 px-4">
-                        <div className="font-bold text-slate-200 group-hover:text-cyan-400 transition-colors">
+                        <div className="font-semibold text-slate-900 group-hover:text-blue-600 transition-colors font-mono">
                           {inc.id}
                         </div>
-                        <div className="text-slate-400 text-[11px] truncate max-w-xs">{inc.title}</div>
+                        <div className="text-slate-500 text-xs truncate max-w-xs">{inc.title}</div>
                       </td>
 
-                      <td className="py-3.5 px-4 text-slate-300 font-semibold">
+                      <td className="py-3.5 px-4 text-slate-700 font-medium">
                         {inc.target_entity}
                       </td>
 
-                      <td className="py-3.5 px-4 font-bold">
-                        <span className={isCritical ? 'text-red-400' : isHigh ? 'text-orange-400' : 'text-amber-400'}>
-                          {inc.threat_score} / 100
+                      <td className="py-3.5 px-4">
+                        <span className={`px-2 py-0.5 text-[10px] font-bold rounded border ${alertLevel.style}`}>
+                          {alertLevel.label}
+                        </span>
+                      </td>
+
+                      <td className="py-3.5 px-4 text-slate-600 font-mono text-[11px]">
+                        <span className="flex items-center gap-1.5">
+                          <Camera className="w-3.5 h-3.5 text-slate-400" />
+                          <span>{inc.primary_camera}</span>
                         </span>
                       </td>
 
                       <td className="py-3.5 px-4">
-                        <span className={`px-2 py-0.5 text-[10px] font-bold rounded border ${
-                          isCritical
-                            ? 'bg-red-500/20 text-red-400 border-red-500/40'
-                            : isHigh
-                            ? 'bg-orange-500/20 text-orange-400 border-orange-500/40'
-                            : 'bg-amber-500/20 text-amber-400 border-amber-500/40'
-                        }`}>
-                          {inc.severity}
-                        </span>
-                      </td>
-
-                      <td className="py-3.5 px-4 text-slate-400 flex items-center gap-1.5">
-                        <Camera className="w-3.5 h-3.5 text-slate-500" />
-                        <span>{inc.primary_camera}</span>
-                      </td>
-
-                      <td className="py-3.5 px-4">
-                        <span className={`px-2 py-0.5 text-[10px] font-bold rounded border ${
+                        <span className={`px-2 py-0.5 text-[10px] font-semibold rounded border ${
                           inc.status === 'NEW'
-                            ? 'bg-red-500/20 text-red-300 border-red-500/40 animate-pulse'
+                            ? 'bg-red-50 text-red-700 border-red-200'
                             : inc.status === 'ACKNOWLEDGED'
-                            ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                            ? 'bg-amber-50 text-amber-700 border-amber-200'
                             : inc.status === 'INVESTIGATING'
-                            ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40'
-                            : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                            ? 'bg-blue-50 text-blue-700 border-blue-200'
+                            : 'bg-emerald-50 text-emerald-700 border-emerald-200'
                         }`}>
                           {inc.status}
                         </span>
                       </td>
 
-                      <td className="py-3.5 px-4 text-slate-400 text-[11px]">
+                      <td className="py-3.5 px-4 text-slate-500 text-[11px] font-mono">
                         {inc.timestamp}
                       </td>
 
@@ -307,8 +244,7 @@ export default function Incidents() {
                           {inc.status === 'NEW' && (
                             <button
                               onClick={(e) => handleQuickStatus(e, inc.id, 'ACKNOWLEDGED')}
-                              className="px-2 py-1 rounded bg-amber-600/80 hover:bg-amber-500 text-white text-[10px] font-bold shadow transition-colors"
-                              title="Acknowledge Incident"
+                              className="px-2.5 py-1 rounded-md bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 text-[11px] font-medium transition-colors"
                             >
                               Ack
                             </button>
@@ -317,8 +253,7 @@ export default function Incidents() {
                           {inc.status === 'ACKNOWLEDGED' && (
                             <button
                               onClick={(e) => handleQuickStatus(e, inc.id, 'INVESTIGATING')}
-                              className="px-2 py-1 rounded bg-cyan-600 hover:bg-cyan-500 text-white text-[10px] font-bold shadow transition-colors"
-                              title="Start Investigation"
+                              className="px-2.5 py-1 rounded-md bg-blue-50 hover:bg-blue-100 text-blue-800 border border-blue-200 text-[11px] font-medium transition-colors"
                             >
                               Investigate
                             </button>
@@ -327,8 +262,7 @@ export default function Incidents() {
                           {inc.status === 'INVESTIGATING' && (
                             <button
                               onClick={(e) => handleQuickStatus(e, inc.id, 'RESOLVED')}
-                              className="px-2 py-1 rounded bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-bold shadow transition-colors"
-                              title="Mark Resolved"
+                              className="px-2.5 py-1 rounded-md bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 text-[11px] font-medium transition-colors"
                             >
                               Resolve
                             </button>
@@ -336,9 +270,8 @@ export default function Incidents() {
 
                           <button 
                             onClick={() => navigate(`/incidents/${inc.id}`)}
-                            className="inline-flex items-center gap-1 text-xs text-cyan-400 hover:text-cyan-300 pl-1 group-hover:translate-x-1 transition-transform"
+                            className="inline-flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 font-medium pl-1 group-hover:translate-x-0.5 transition-transform"
                           >
-                            <Eye className="w-3.5 h-3.5" />
                             <span>Dossier</span>
                             <ArrowRight className="w-3 h-3" />
                           </button>

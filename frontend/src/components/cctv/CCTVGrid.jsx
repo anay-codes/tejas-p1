@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import CameraFeedCanvas from './CameraFeedCanvas';
-import { Grid2X2, Grid3X3, Maximize2, ShieldCheck } from 'lucide-react';
+import { Grid2X2, Grid3X3, X } from 'lucide-react';
 
 export default function CCTVGrid({ cameras = [], entities = [], zones = [], tick = 0, isLiveMode = false, telemetry = null }) {
   const [layout, setLayout] = useState('2x2'); // '2x2' or 'all'
@@ -12,41 +12,35 @@ export default function CCTVGrid({ cameras = [], entities = [], zones = [], tick
     <div className="space-y-3">
       {/* CCTV Grid Top Bar */}
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <div className="flex items-center gap-2">
-            <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
-            <h2 className="text-sm font-bold tracking-wider text-slate-200 font-mono uppercase">
-              {isLiveMode ? 'REAL HARDWARE CCTV MATRIX' : 'LIVE TACTICAL FEEDS'} ({displayedCameras.length} CHANNELS)
-            </h2>
-          </div>
-          <span className={`text-[10px] font-mono px-2 py-0.5 rounded border ${
-            isLiveMode 
-              ? 'bg-cyan-500/10 text-cyan-400 border-cyan-500/30 font-bold' 
-              : 'bg-slate-800 text-slate-400 border-slate-700'
-          }`}>
-            {isLiveMode ? 'WEBCAM + YOLOv8 + BYTETRACK' : 'AUTO-CORRELATION ACTIVE'}
+        <div className="flex items-center gap-2.5">
+          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+          <h2 className="text-xs font-bold tracking-wider text-slate-800 uppercase">
+            {isLiveMode ? 'Live Camera Matrix' : 'Surveillance Grid'} ({displayedCameras.length} Channels)
+          </h2>
+          <span className="text-[10px] px-2 py-0.5 rounded bg-blue-50 text-blue-700 font-medium border border-blue-200">
+            {isLiveMode ? 'YOLOv8 + ByteTrack Active' : 'Online'}
           </span>
         </div>
 
         {/* Layout Switcher */}
-        <div className="flex items-center gap-1 bg-[#131D31] p-1 rounded-lg border border-[#1E2D48]">
+        <div className="flex items-center gap-1 bg-slate-100 p-0.5 rounded-md border border-slate-200">
           <button
             onClick={() => setLayout('2x2')}
             className={`p-1.5 rounded text-xs transition-colors ${
-              layout === '2x2' ? 'bg-cyan-500/20 text-cyan-400 font-semibold' : 'text-slate-400 hover:text-white'
+              layout === '2x2' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'
             }`}
-            title="2x2 Primary Tactical Feeds"
+            title="2x2 Grid"
           >
-            <Grid2X2 className="w-4 h-4" />
+            <Grid2X2 className="w-3.5 h-3.5" />
           </button>
           <button
             onClick={() => setLayout('all')}
             className={`p-1.5 rounded text-xs transition-colors ${
-              layout === 'all' ? 'bg-cyan-500/20 text-cyan-400 font-semibold' : 'text-slate-400 hover:text-white'
+              layout === 'all' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'
             }`}
-            title="View All Perimeter Feeds"
+            title="All Cameras Grid"
           >
-            <Grid3X3 className="w-4 h-4" />
+            <Grid3X3 className="w-3.5 h-3.5" />
           </button>
         </div>
       </div>
@@ -70,26 +64,25 @@ export default function CCTVGrid({ cameras = [], entities = [], zones = [], tick
         })}
       </div>
 
-
       {/* Focused Camera Modal */}
       {focusedCamera && (
-        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="tactical-card max-w-4xl w-full rounded-2xl overflow-hidden border border-cyan-500/40 p-4">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-800 mb-3">
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white max-w-4xl w-full rounded-xl overflow-hidden border border-slate-200 shadow-2xl p-4">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-3">
               <div className="flex items-center gap-2">
-                <span className="w-3 h-3 rounded-full bg-red-500 animate-pulse" />
-                <span className="font-mono font-bold text-slate-100 text-sm">
+                <span className="w-2.5 h-2.5 rounded-full bg-red-600 animate-pulse" />
+                <span className="font-semibold text-slate-900 text-sm">
                   {focusedCamera.code} — {focusedCamera.name}
                 </span>
               </div>
               <button
                 onClick={() => setFocusedCamera(null)}
-                className="px-3 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-mono"
+                className="p-1 rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-100"
               >
-                CLOSE [ESC]
+                <X className="w-4 h-4" />
               </button>
             </div>
-            <div className="aspect-video w-full">
+            <div className="aspect-video w-full rounded-lg overflow-hidden border border-slate-200">
               <CameraFeedCanvas
                 camera={focusedCamera}
                 entities={entities}

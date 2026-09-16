@@ -63,6 +63,19 @@ def run_sqlite_migrations():
                 cursor.execute("ALTER TABLE events ADD COLUMN incident_id VARCHAR(100)")
 
         conn.commit()
+
+        # Phase 2 migrations
+        cursor.execute("PRAGMA table_info(alerts)")
+        alert_cols = [row[1] for row in cursor.fetchall()]
+        if alert_cols and "alert_level" not in alert_cols:
+            cursor.execute("ALTER TABLE alerts ADD COLUMN alert_level VARCHAR(20) DEFAULT 'INFO'")
+
+        cursor.execute("PRAGMA table_info(users)")
+        user_cols = [row[1] for row in cursor.fetchall()]
+        if not user_cols:
+            pass  # Will be created by create_all
+
+        conn.commit()
         conn.close()
     except Exception as e:
         # Ignore if tables not yet created (create_all will create them)

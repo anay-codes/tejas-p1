@@ -1,88 +1,108 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Shield, Key, Lock, User, ArrowRight } from 'lucide-react';
+import { Shield, Lock, User, ArrowRight, AlertCircle, Loader2 } from 'lucide-react';
+import { authService } from '../services/auth';
 
 export default function Login() {
   const navigate = useNavigate();
-  const [username, setUsername] = useState('operator.rawat');
-  const [password, setPassword] = useState('••••••••••••');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
 
-  const handleLogin = (e) => {
+  const handleLogin = async (e) => {
     e.preventDefault();
-    navigate('/dashboard');
+    setError('');
+    setLoading(true);
+
+    try {
+      await authService.login(username, password);
+      navigate('/dashboard');
+    } catch (err) {
+      setError(err.message || 'Authentication failed. Please check credentials.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
-    <div className="min-h-screen bg-[#080C14] flex items-center justify-center p-4 relative overflow-hidden hud-grid">
-      {/* Background glow effects */}
-      <div className="absolute w-96 h-96 bg-cyan-500/10 rounded-full blur-3xl pointer-events-none -top-20 -left-20" />
-      <div className="absolute w-96 h-96 bg-blue-600/10 rounded-full blur-3xl pointer-events-none -bottom-20 -right-20" />
-
-      <div className="tactical-card max-w-md w-full rounded-2xl p-8 border border-[#1E2D48] relative z-10 shadow-2xl">
+    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
+      <div className="bg-white max-w-sm w-full rounded-xl p-8 border border-slate-200 shadow-sm">
         {/* Brand Header */}
-        <div className="text-center mb-8">
-          <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-cyan-500/20 to-blue-600/30 border border-cyan-500/40 flex items-center justify-center mx-auto mb-4 shadow-lg shadow-cyan-500/20">
-            <Shield className="w-7 h-7 text-cyan-400" />
+        <div className="text-center mb-6">
+          <div className="w-12 h-12 rounded-xl bg-blue-50 border border-blue-200 flex items-center justify-center mx-auto mb-3 text-blue-600">
+            <Shield className="w-6 h-6" />
           </div>
-          <h1 className="text-2xl font-extrabold text-white tracking-wider font-mono">
+          <h1 className="text-xl font-bold text-slate-900 tracking-tight">
             TEJAS
           </h1>
-          <p className="text-xs text-cyan-400 font-mono tracking-widest mt-0.5">
-            THREAT EVALUATION & JOINT AI SURVEILLANCE
-          </p>
-          <p className="text-[11px] text-slate-400 mt-2">
-            Secure Command Centre Terminal Authentication
+          <p className="text-xs text-slate-500 mt-0.5">
+            Surveillance & Threat Evaluation Command
           </p>
         </div>
 
+        {/* Error notification */}
+        {error && (
+          <div className="mb-4 p-3 rounded-md bg-red-50 border border-red-200 text-red-700 text-xs flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            <span>{error}</span>
+          </div>
+        )}
+
         {/* Login Form */}
-        <form onSubmit={handleLogin} className="space-y-4 text-xs font-mono">
+        <form onSubmit={handleLogin} className="space-y-4 text-xs">
           <div>
-            <label className="block text-slate-400 mb-1.5 uppercase tracking-wider text-[10px]">
-              Operator Identifier / Call-sign
+            <label className="block text-slate-700 font-medium mb-1">
+              Username
             </label>
             <div className="relative">
-              <User className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+              <User className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
                 required
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
-                className="w-full pl-9 pr-3 py-2.5 rounded-lg bg-[#0E1524] border border-slate-700 text-slate-200 focus:outline-none focus:border-cyan-400"
+                placeholder="Enter username"
+                className="input-clean w-full pl-9 py-2 text-xs"
               />
             </div>
           </div>
 
           <div>
-            <label className="block text-slate-400 mb-1.5 uppercase tracking-wider text-[10px]">
-              Security Passcode / Token
+            <label className="block text-slate-700 font-medium mb-1">
+              Password
             </label>
             <div className="relative">
-              <Lock className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+              <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
               <input
                 type="password"
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full pl-9 pr-3 py-2.5 rounded-lg bg-[#0E1524] border border-slate-700 text-slate-200 focus:outline-none focus:border-cyan-400"
+                placeholder="••••••••••••"
+                className="input-clean w-full pl-9 py-2 text-xs"
               />
             </div>
           </div>
 
           <button
             type="submit"
-            className="w-full mt-2 py-3 rounded-lg bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-bold tracking-wider uppercase text-xs shadow-lg shadow-cyan-600/30 flex items-center justify-center gap-2 transition-all group"
+            disabled={loading}
+            className="w-full mt-2 py-2.5 rounded-md bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-semibold text-xs shadow-sm flex items-center justify-center gap-2 transition-colors"
           >
-            <span>Authenticate Session</span>
-            <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+            {loading ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span>Authenticating...</span>
+              </>
+            ) : (
+              <>
+                <span>Sign In</span>
+                <ArrowRight className="w-4 h-4" />
+              </>
+            )}
           </button>
         </form>
-
-        {/* Credentials hints for reviewer */}
-        <div className="mt-6 pt-4 border-t border-slate-800 text-center text-[10px] font-mono text-slate-500">
-          AUTHORIZED ROLES: ADMIN / CHIEF OPERATOR / DISPATCHER
-        </div>
       </div>
     </div>
   );

@@ -1,72 +1,72 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, Polygon, CircleMarker, Polyline, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, Polygon, Polyline, useMap } from 'react-leaflet';
 import L from 'leaflet';
-import { Crosshair, MapPin, ShieldAlert, Layers, Navigation, Radio, AlertTriangle, Eye, Video } from 'lucide-react';
+import { Crosshair, ShieldAlert, Navigation } from 'lucide-react';
 import { apiClient } from '../../services/api';
 
 // Centered on Jammu Border Tactical Sector
 const SECTOR_CENTER = [32.7285, 74.8605];
 
-// Custom Leaflet DivIcons for Tactical Military Aesthetic
+// Custom Leaflet DivIcons for Clean Professional Surveillance
 function createCameraIcon(code, isThreat = false, isSelected = false) {
   return L.divIcon({
     className: 'custom-tactical-marker',
     html: `
       <div style="position: relative; display: flex; align-items: center; justify-content: center;">
-        ${isThreat ? '<span style="position: absolute; width: 34px; height: 34px; border-radius: 50%; background: rgba(239, 68, 68, 0.4); animation: beacon-pulse 1.8s infinite;"></span>' : ''}
+        ${isThreat ? '<span style="position: absolute; width: 30px; height: 30px; border-radius: 50%; background: rgba(220, 38, 38, 0.25); animation: ping 2s cubic-bezier(0, 0, 0.2, 1) infinite;"></span>' : ''}
         <div style="
-          width: 28px; 
-          height: 28px; 
+          width: 26px; 
+          height: 26px; 
           border-radius: 6px; 
-          background: ${isThreat ? '#7F1D1D' : isSelected ? '#0891B2' : '#0E172A'}; 
-          border: 1.5px solid ${isThreat ? '#EF4444' : isSelected ? '#22D3EE' : '#38BDF8'}; 
+          background: ${isThreat ? '#DC2626' : isSelected ? '#2563EB' : '#FFFFFF'}; 
+          border: 1.5px solid ${isThreat ? '#991B1B' : isSelected ? '#1D4ED8' : '#64748B'}; 
           display: flex; 
           align-items: center; 
           justify-content: center;
-          box-shadow: 0 4px 14px rgba(0,0,0,0.7);
+          box-shadow: 0 1px 3px rgba(0,0,0,0.15);
           cursor: pointer;
         ">
-          <span style="color: ${isThreat ? '#FCA5A5' : '#E0F2FE'}; font-size: 11px; font-weight: bold; font-family: 'JetBrains Mono', monospace;">
+          <span style="color: ${isThreat || isSelected ? '#FFFFFF' : '#1E293B'}; font-size: 10px; font-weight: bold; font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
             ${code.replace('CAM-', 'C').replace('BOP-', 'B')}
           </span>
         </div>
       </div>
     `,
-    iconSize: [30, 30],
-    iconAnchor: [15, 15],
-    popupAnchor: [0, -18]
+    iconSize: [28, 28],
+    iconAnchor: [14, 14],
+    popupAnchor: [0, -16]
   });
 }
 
-function createIncidentIcon(score, severity) {
-  const isCritical = score >= 80 || severity === 'CRITICAL';
+function createIncidentIcon(severity) {
+  const isPriority = severity === 'CRITICAL' || severity === 'PRIORITY';
   return L.divIcon({
     className: 'custom-incident-beacon',
     html: `
       <div style="position: relative; display: flex; align-items: center; justify-content: center;">
-        <span style="position: absolute; width: 40px; height: 40px; border-radius: 50%; background: ${isCritical ? 'rgba(239, 68, 68, 0.5)' : 'rgba(249, 115, 22, 0.4)'}; animation: beacon-pulse 1.5s infinite;"></span>
+        <span style="position: absolute; width: 32px; height: 32px; border-radius: 50%; background: ${isPriority ? 'rgba(220, 38, 38, 0.25)' : 'rgba(217, 119, 6, 0.25)'}; animation: ping 2s cubic-bezier(0, 0, 0.2, 1) infinite;"></span>
         <div style="
-          width: 22px; 
-          height: 22px; 
+          width: 20px; 
+          height: 20px; 
           border-radius: 50%; 
-          background: ${isCritical ? '#EF4444' : '#F97316'}; 
+          background: ${isPriority ? '#DC2626' : '#D97706'}; 
           border: 2px solid #FFFFFF; 
           display: flex; 
           align-items: center; 
           justify-content: center;
-          font-family: 'JetBrains Mono', monospace;
-          font-size: 10px;
+          font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+          font-size: 11px;
           font-weight: 800;
           color: #FFFFFF;
-          box-shadow: 0 0 16px ${isCritical ? 'rgba(239, 68, 68, 0.8)' : 'rgba(249, 115, 22, 0.8)'};
+          box-shadow: 0 2px 4px rgba(0,0,0,0.2);
         ">
           !
         </div>
       </div>
     `,
-    iconSize: [30, 30],
-    iconAnchor: [15, 15],
-    popupAnchor: [0, -18]
+    iconSize: [28, 28],
+    iconAnchor: [14, 14],
+    popupAnchor: [0, -16]
   });
 }
 
@@ -96,7 +96,6 @@ export default function TacticalMapLeaflet({
   const [focusedPoint, setFocusedPoint] = useState(SECTOR_CENTER);
   const [mapZoom, setMapZoom] = useState(14);
 
-  // Fetch real cameras, zones, and active incidents from backend APIs
   useEffect(() => {
     let isMounted = true;
 
@@ -131,7 +130,6 @@ export default function TacticalMapLeaflet({
     return () => { isMounted = false; };
   }, []);
 
-  // Map camera lookup by code/id for incident pinpointing
   const cameraCoordMap = useMemo(() => {
     const map = {};
     cameras.forEach(c => {
@@ -143,44 +141,36 @@ export default function TacticalMapLeaflet({
     return map;
   }, [cameras]);
 
-  // Unresolved active incidents
   const activeIncidents = useMemo(() => {
     return incidents.filter(i => i.status !== 'RESOLVED');
   }, [incidents]);
 
-  // Handle Recenter Click
   const handleRecenter = () => {
     setFocusedPoint(SECTOR_CENTER);
     setMapZoom(14);
   };
 
-  // Convert zone polygon coordinates to geographic coordinates anchored around sector
   const renderedPolygons = useMemo(() => {
     return zones.map((z, idx) => {
-      // Anchored geographical polygon coordinates for sector zones
       const sectorZoneCoords = [
-        // Sector B Restricted Perimeter
         [
           [32.7310, 74.8630],
           [32.7350, 74.8670],
           [32.7335, 74.8720],
           [32.7290, 74.8660]
         ],
-        // Ammunition Storage Buffer
         [
           [32.7295, 74.8610],
           [32.7325, 74.8635],
           [32.7305, 74.8670],
           [32.7280, 74.8640]
         ],
-        // North Outpost Approach Line
         [
           [32.7250, 74.8550],
           [32.7285, 74.8580],
           [32.7270, 74.8610],
           [32.7235, 74.8570]
         ],
-        // Webcam Sector Alpha Zone
         [
           [32.7260, 74.8560],
           [32.7275, 74.8585],
@@ -193,75 +183,75 @@ export default function TacticalMapLeaflet({
         id: z.id,
         name: z.name,
         type: z.type,
-        color: z.color || '#EF4444',
+        color: z.color || '#DC2626',
         positions
       };
     });
   }, [zones]);
 
   return (
-    <div className="tactical-card rounded-xl border border-[#1E2D48] flex flex-col overflow-hidden relative shadow-2xl">
+    <div className="bg-white rounded-lg border border-slate-200 shadow-sm flex flex-col overflow-hidden relative">
       {/* Header Bar */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-[#1E2D48] bg-[#0A0F1C]/90">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 bg-white">
         <div className="flex items-center gap-2">
-          <div className="p-1 rounded bg-cyan-500/10 border border-cyan-500/30 text-cyan-400">
+          <div className="p-1 rounded bg-blue-50 text-blue-600">
             <Crosshair className="w-4 h-4" />
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-100 font-mono">
-                TACTICAL PERIMETER MAP
+              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-800">
+                Perimeter Geospatial Overview
               </h3>
-              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 font-bold">
-                LEAFLET ENGINE ONLINE
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 font-semibold border border-emerald-200">
+                Online
               </span>
             </div>
-            <p className="text-[10px] font-mono text-slate-400">
-              COORDS: 32.7285° N, 74.8605° E • BORDER SECTOR ALPHA-BRAVO
+            <p className="text-[11px] text-slate-500">
+              Sector Alpha-Bravo (32.7285° N, 74.8605° E)
             </p>
           </div>
         </div>
 
         {/* Map Viewport Controls */}
-        <div className="flex items-center gap-2 font-mono text-xs">
+        <div className="flex items-center gap-2 text-xs">
           <button
             onClick={() => setShowZones(!showZones)}
-            className={`px-2.5 py-1 rounded text-[11px] font-semibold transition-all border ${
+            className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors border ${
               showZones 
-                ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40' 
-                : 'bg-slate-900 text-slate-500 border-slate-800 hover:text-slate-300'
+                ? 'bg-blue-50 text-blue-700 border-blue-200' 
+                : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'
             }`}
           >
-            FENCE ZONES ({renderedPolygons.length})
+            Zones ({renderedPolygons.length})
           </button>
 
           <button
             onClick={() => setShowIncidents(!showIncidents)}
-            className={`px-2.5 py-1 rounded text-[11px] font-semibold transition-all border ${
+            className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors border ${
               showIncidents 
-                ? 'bg-red-500/20 text-red-300 border-red-500/40' 
-                : 'bg-slate-900 text-slate-500 border-slate-800 hover:text-slate-300'
+                ? 'bg-red-50 text-red-700 border-red-200' 
+                : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'
             }`}
           >
-            ACTIVE INCIDENTS ({activeIncidents.length})
+            Incidents ({activeIncidents.length})
           </button>
 
           <button
             onClick={handleRecenter}
-            className="p-1.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition-colors"
+            className="p-1.5 rounded-md border border-slate-300 bg-white hover:bg-slate-50 text-slate-600 transition-colors"
             title="Recenter Map View"
           >
-            <Navigation className="w-3.5 h-3.5 text-cyan-400" />
+            <Navigation className="w-3.5 h-3.5 text-slate-600" />
           </button>
         </div>
       </div>
 
       {/* Map Container Viewport */}
-      <div style={{ height }} className="w-full relative bg-[#070B14]">
+      <div style={{ height }} className="w-full relative bg-slate-100">
         {isLoading && (
-          <div className="absolute inset-0 z-30 bg-black/60 backdrop-blur-sm flex items-center justify-center font-mono text-xs text-cyan-400 gap-2">
-            <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping" />
-            <span>SYNCHRONIZING PERIMETER SPATIAL LAYERS...</span>
+          <div className="absolute inset-0 z-30 bg-white/70 backdrop-blur-sm flex items-center justify-center text-xs text-slate-600 font-medium gap-2">
+            <span className="w-2 h-2 rounded-full bg-blue-600 animate-ping" />
+            <span>Loading geospatial layers...</span>
           </div>
         )}
 
@@ -273,10 +263,10 @@ export default function TacticalMapLeaflet({
         >
           <MapController center={focusedPoint} zoom={mapZoom} />
 
-          {/* CartoDB Dark Matter Base Tiles */}
+          {/* CartoDB Voyager Clean High-Contrast Base Tiles */}
           <TileLayer
-            attribution='&copy; <a href="https://carto.com/">CARTO</a> | TEJAS Perimeter Geospatial Engine'
-            url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+            attribution='&copy; <a href="https://carto.com/">CARTO</a>'
+            url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
             subdomains="abcd"
             maxZoom={19}
           />
@@ -291,10 +281,10 @@ export default function TacticalMapLeaflet({
               [32.7360, 74.8710]
             ]}
             pathOptions={{
-              color: '#EF4444',
+              color: '#DC2626',
               weight: 2,
               dashArray: '6, 8',
-              opacity: 0.7
+              opacity: 0.8
             }}
           />
 
@@ -306,19 +296,19 @@ export default function TacticalMapLeaflet({
               pathOptions={{
                 color: zone.color,
                 fillColor: zone.color,
-                fillOpacity: 0.15,
+                fillOpacity: 0.20,
                 weight: 1.5,
                 dashArray: '4, 4'
               }}
             >
               <Popup>
-                <div className="font-mono text-xs space-y-1">
-                  <div className="font-bold text-red-400 uppercase tracking-wide flex items-center gap-1">
+                <div className="text-xs space-y-1 p-1">
+                  <div className="font-bold text-red-700 flex items-center gap-1">
                     <ShieldAlert className="w-3.5 h-3.5" />
                     <span>{zone.name}</span>
                   </div>
-                  <div className="text-[10px] text-slate-400">TYPE: {zone.type}</div>
-                  <div className="text-[10px] text-slate-300">GEO-FENCE INTRUSION DETECTION ACTIVE</div>
+                  <div className="text-slate-500 text-[11px]">Type: {zone.type}</div>
+                  <div className="text-slate-600 text-[11px]">Perimeter detection active</div>
                 </div>
               </Popup>
             </Polygon>
@@ -344,22 +334,21 @@ export default function TacticalMapLeaflet({
                 }}
               >
                 <Popup>
-                  <div className="font-mono text-xs space-y-1.5 p-1">
-                    <div className="flex items-center justify-between gap-2 border-b border-slate-700/60 pb-1">
-                      <span className="font-bold text-cyan-400">{cam.code}</span>
-                      <span className="text-[10px] px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                  <div className="text-xs space-y-1.5 p-1">
+                    <div className="flex items-center justify-between gap-2 border-b border-slate-200 pb-1">
+                      <span className="font-bold text-slate-900 font-mono">{cam.code}</span>
+                      <span className="text-[10px] px-1.5 py-0.2 rounded bg-emerald-50 text-emerald-700 font-medium">
                         {cam.status}
                       </span>
                     </div>
-                    <div className="font-semibold text-slate-200 text-[11px]">{cam.name}</div>
-                    <div className="text-[10px] text-slate-400">LOC: {cam.location}</div>
-                    <div className="text-[10px] text-slate-400">
-                      GPS: {cam.lat.toFixed(4)}°N, {cam.lng.toFixed(4)}°E
+                    <div className="font-medium text-slate-800 text-[11px]">{cam.name}</div>
+                    <div className="text-[11px] text-slate-500">Location: {cam.location}</div>
+                    <div className="text-[10px] text-slate-400 font-mono">
+                      {cam.lat.toFixed(4)}°N, {cam.lng.toFixed(4)}°E
                     </div>
-                    <div className="text-[10px] text-slate-400">TYPE: {cam.stream_type} • {cam.resolution}</div>
                     {isThreat && (
-                      <div className="text-[10px] font-bold text-red-400 animate-pulse pt-0.5">
-                        ACTIVE INTRUSION ALARM ASSOCIATED
+                      <div className="text-[10px] font-bold text-red-700 pt-0.5">
+                        Active Alert Associated
                       </div>
                     )}
                   </div>
@@ -373,32 +362,30 @@ export default function TacticalMapLeaflet({
             const coords = cameraCoordMap[inc.primary_camera];
             if (!coords) return null;
 
-            // Offset slightly from camera marker so both are visible
             const beaconCoords = [coords[0] + 0.0006, coords[1] + 0.0006];
 
             return (
               <Marker
                 key={inc.id}
                 position={beaconCoords}
-                icon={createIncidentIcon(inc.threat_score, inc.severity)}
+                icon={createIncidentIcon(inc.severity)}
               >
                 <Popup>
-                  <div className="font-mono text-xs space-y-1.5 p-1">
-                    <div className="flex items-center justify-between gap-2 border-b border-slate-700/60 pb-1">
-                      <span className="font-bold text-red-400">{inc.id}</span>
-                      <span className="text-[10px] px-1.5 py-0.2 rounded bg-red-500/20 text-red-400 border border-red-500/30 font-bold">
-                        {inc.severity} ({inc.threat_score})
+                  <div className="text-xs space-y-1.5 p-1">
+                    <div className="flex items-center justify-between gap-2 border-b border-slate-200 pb-1">
+                      <span className="font-bold text-red-700 font-mono">{inc.id}</span>
+                      <span className="text-[10px] px-1.5 py-0.2 rounded bg-red-50 text-red-700 font-bold">
+                        {inc.severity}
                       </span>
                     </div>
-                    <div className="font-bold text-slate-100 text-[11px]">{inc.title}</div>
-                    <div className="text-[10px] text-slate-300">TARGET: {inc.target_entity}</div>
-                    <div className="text-[10px] text-slate-400">CAMERA: {inc.primary_camera}</div>
-                    <div className="text-[10px] text-slate-400">TIME: {inc.timestamp}</div>
+                    <div className="font-medium text-slate-900 text-[11px]">{inc.title}</div>
+                    <div className="text-[11px] text-slate-500">Target: {inc.target_entity}</div>
+                    <div className="text-[11px] text-slate-500">Camera: {inc.primary_camera}</div>
                     <a
                       href={`/incidents/${inc.id}`}
-                      className="block mt-1 text-center text-[10px] bg-cyan-600 hover:bg-cyan-500 text-white rounded py-1 font-bold transition-colors"
+                      className="block mt-1 text-center text-[11px] bg-blue-600 hover:bg-blue-700 text-white rounded py-1 font-medium transition-colors"
                     >
-                      OPEN INCIDENT DOSSIER
+                      View Incident
                     </a>
                   </div>
                 </Popup>
@@ -407,19 +394,19 @@ export default function TacticalMapLeaflet({
           })}
         </MapContainer>
 
-        {/* Tactical Map Corner Telemetry Badge */}
-        <div className="absolute bottom-3 left-3 z-[400] bg-[#080C14]/90 backdrop-blur-md px-2.5 py-1.5 rounded-lg border border-[#1E2D48] font-mono text-[10px] text-slate-300 pointer-events-none shadow-xl flex items-center gap-3">
+        {/* Map Corner Telemetry Badge */}
+        <div className="absolute bottom-3 left-3 z-[400] bg-white/95 backdrop-blur-md px-2.5 py-1.5 rounded-md border border-slate-200 text-xs text-slate-600 shadow-sm flex items-center gap-2.5">
           <div className="flex items-center gap-1.5">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-            <span>GEO-RADAR LIVE</span>
+            <span className="w-2 h-2 rounded-full bg-emerald-500" />
+            <span className="font-medium text-slate-800">Geospatial</span>
           </div>
-          <span className="text-slate-600">|</span>
-          <span className="text-cyan-400 font-bold">{cameras.length} CAMERAS</span>
-          <span className="text-slate-600">|</span>
-          <span className="text-amber-400 font-bold">{renderedPolygons.length} ZONES</span>
-          <span className="text-slate-600">|</span>
-          <span className={activeIncidents.length > 0 ? "text-red-400 font-bold" : "text-emerald-400"}>
-            {activeIncidents.length} BREACHES
+          <span className="text-slate-300">|</span>
+          <span><strong>{cameras.length}</strong> Cameras</span>
+          <span className="text-slate-300">|</span>
+          <span><strong>{renderedPolygons.length}</strong> Zones</span>
+          <span className="text-slate-300">|</span>
+          <span className={activeIncidents.length > 0 ? "text-red-700 font-medium" : "text-slate-600"}>
+            <strong>{activeIncidents.length}</strong> Active Breaches
           </span>
         </div>
       </div>

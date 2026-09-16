@@ -12,23 +12,22 @@ export default function DashboardLayout() {
   const unresolvedCount = (incidents || []).filter(i => i.status !== 'RESOLVED').length;
 
   return (
-    <div className="min-h-screen bg-[#080C14] text-slate-100 flex flex-col">
-      {/* Top Tactical Navbar */}
+    <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col antialiased">
+      {/* Top Navbar */}
       <Navbar 
         isConnected={isConnected && isBackendOnline}
         activeIncidentsCount={unresolvedCount}
-        currentScore={activeThreat?.score ?? 10}
-        severity={activeThreat?.severity ?? 'LOW'}
+        severity={activeThreat?.severity || activeThreat?.level || 'INFO'}
       />
 
       {/* Main Workspace Area with Sidebar and Content */}
-      <div className="flex flex-1">
+      <div className="flex flex-1 overflow-hidden">
         <Sidebar 
           activeIncidentsCount={unresolvedCount}
           telemetry={telemetry}
           isOnline={isBackendOnline}
         />
-        <main className="flex-1 overflow-y-auto bg-[#080C14]">
+        <main className="flex-1 overflow-y-auto bg-slate-50">
           <Outlet />
         </main>
       </div>

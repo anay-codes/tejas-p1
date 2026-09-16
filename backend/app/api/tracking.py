@@ -20,7 +20,22 @@ router = APIRouter(prefix="/tracking", tags=["Multi-Camera Tracking & Re-ID"])
 
 class TrackingConfigPayload(BaseModel):
     similarity_threshold: Optional[float] = None
+    uncertainty_threshold: Optional[float] = None
     max_transit_seconds: Optional[float] = None
+
+
+class CameraEdgePayload(BaseModel):
+    from_camera: str
+    to_camera: str
+    min_transit_seconds: float = 1.0
+    max_transit_seconds: float = 180.0
+    is_connected: bool = True
+    corridor_name: Optional[str] = None
+    bidirectional: bool = True
+
+
+class StrictModePayload(BaseModel):
+    strict_mode: bool
 
 
 class SimulateTransitPayload(BaseModel):
@@ -28,8 +43,9 @@ class SimulateTransitPayload(BaseModel):
     to_camera: str = "CAM-02"
     transit_seconds: float = 12.5
     subject_type: str = "PERSON"
-    should_match: bool = True
-    subject_outfit: str = "navy_jacket_dark_jeans" # "navy_jacket_dark_jeans" or "red_hoodie_khaki"
+    mode: str = "MATCH"  # "MATCH", "UNCERTAIN", "NO_MATCH"
+    subject_outfit: str = "navy_jacket_dark_jeans"
+
 
 
 def generate_synthetic_person_crop(outfit: str = "navy_jacket_dark_jeans", variant: int = 0) -> np.ndarray:
@@ -99,13 +115,15 @@ def get_global_track_detail(track_id: str):
 
 @router.post("/config")
 def update_tracking_config(payload: TrackingConfigPayload):
-    """Configures Re-ID sensitivity threshold and transit window."""
+    """Configures Re-ID sensitivity thresholds and transit window."""
     reid_service.set_config(
         threshold=payload.similarity_threshold,
+        uncertainty_threshold=payload.uncertainty_threshold,
         max_transit=payload.max_transit_seconds
     )
     return {
         "similarity_threshold": reid_service.similarity_threshold,
+        "uncertainty_threshold": reid_service.uncertainty_threshold,
         "max_transit_seconds": reid_service.max_transit_seconds,
         "message": "Re-ID configuration updated successfully"
     }
@@ -116,19 +134,68 @@ def get_tracking_config():
     """Gets current Re-ID sensitivity and temporal settings."""
     return {
         "similarity_threshold": reid_service.similarity_threshold,
+        "uncertainty_threshold": reid_service.uncertainty_threshold,
         "max_transit_seconds": reid_service.max_transit_seconds
+    }
+
+
+@router.get("/topology")
+def get_camera_topology():
+    """Returns dynamic camera adjacency graph, corridor constraints, and registered nodes."""
+    return reid_service.get_topology()
+
+
+@router.post("/topology/edge")
+def set_camera_edge(payload: CameraEdgePayload):
+    """Configures or updates a directional or bidirectional transition corridor between cameras."""
+    reid_service.set_camera_edge(
+        from_cam=payload.from_camera,
+        to_cam=payload.to_camera,
+        min_transit=payload.min_transit_seconds,
+        max_transit=payload.max_transit_seconds,
+        is_connected=payload.is_connected,
+        corridor_name=payload.corridor_name or "",
+        bidirectional=payload.bidirectional
+    )
+    return {
+        "status": "CONFIGURED",
+        "edge": payload.model_dump(),
+        "topology": reid_service.get_topology()
+    }
+
+
+@router.delete("/topology/edge")
+def remove_camera_edge(from_camera: str = Query(...), to_camera: str = Query(...), bidirectional: bool = True):
+    """Removes a corridor edge between two cameras in the topology graph."""
+    reid_service.remove_camera_edge(from_camera, to_camera, bidirectional)
+    return {
+        "status": "REMOVED",
+        "from_camera": from_camera,
+        "to_camera": to_camera,
+        "topology": reid_service.get_topology()
+    }
+
+
+@router.post("/topology/strict")
+def toggle_strict_mode(payload: StrictModePayload):
+    """Toggles strict topology mode (if enabled, unlinked cameras strictly cannot handoff)."""
+    reid_service.topology.strict_mode = payload.strict_mode
+    return {
+        "strict_mode": reid_service.topology.strict_mode,
+        "message": f"Strict topology mode {'enabled' if payload.strict_mode else 'disabled'}"
     }
 
 
 @router.post("/simulate-transit")
 def simulate_multi_camera_transit(payload: SimulateTransitPayload):
     """
-    Executes a genuine multi-camera cross-over test:
+    Executes an explainable multi-camera transition evaluation:
     1. Ingests Camera A frame with subject crop.
     2. Simulates physical transit across blind-zone to Camera B.
-    3. Ingests Camera B frame (either same person with viewpoint/lighting shift, or different person).
-    4. Runs genuine Re-ID appearance embedding extraction and cosine similarity matching.
-    5. Propagates threat score and generates real CROSS_CAMERA_HANDOFF events.
+    3. Ingests Camera B frame with appearance variation based on requested mode.
+    4. Evaluates physical feasibility via CameraTopology (impossible-transition protection).
+    5. Runs genuine Re-ID appearance embedding extraction and cosine similarity matching.
+    6. Returns MATCH / UNCERTAIN / NO_MATCH probabilistic categorization without numeric threat scores.
     """
     # 1. Camera A detection
     outfit_a = payload.subject_outfit
@@ -147,9 +214,12 @@ def simulate_multi_camera_transit(payload: SimulateTransitPayload):
     )
 
     # 2. Camera B detection
-    if payload.should_match:
-        # Same subject with realistic perspective/lighting variation
-        crop_b = generate_synthetic_person_crop(outfit_a, variant=2)
+    if payload.mode == "MATCH":
+        # Same subject with subtle lighting/angle shift (high similarity)
+        crop_b = generate_synthetic_person_crop(outfit_a, variant=1)
+    elif payload.mode == "UNCERTAIN":
+        # Partial similarity shift (e.g. jacket lighting change or minor color delta)
+        crop_b = generate_synthetic_person_crop(outfit_a, variant=5)
     else:
         # Completely different subject
         alt_outfit = "red_hoodie_khaki" if outfit_a != "red_hoodie_khaki" else "grey_overcoat"
@@ -158,7 +228,7 @@ def simulate_multi_camera_transit(payload: SimulateTransitPayload):
     time_b = datetime.datetime.now().strftime("%H:%M:%S")
     local_id_b = 602
 
-    # Ingest Camera B
+    # Ingest Camera B with topological and temporal checking
     gid_b, is_handoff, match_info = reid_service.match_or_create_global_track(
         camera_id=payload.to_camera,
         local_track_id=local_id_b,
@@ -169,43 +239,48 @@ def simulate_multi_camera_transit(payload: SimulateTransitPayload):
         transit_dt_override=payload.transit_seconds
     )
 
-    # If cross-camera handoff occurred, dispatch event & threat correlation
+    # If cross-camera handoff occurred, dispatch event to operational event engine
     if is_handoff and match_info:
-        event_engine.handle_cross_camera_handoff(
+        event_engine.handle_cross_camera_candidate(
             global_track_id=gid_b,
             from_camera=match_info["from_camera"],
             to_camera=match_info["to_camera"],
             similarity_score=match_info["similarity_score"],
             transit_seconds=payload.transit_seconds,
             entity_type=payload.subject_type,
-            snapshot_b64=match_info.get("snapshot_b64")
+            snapshot_b64=match_info.get("snapshot_b64"),
+            match_status=match_info.get("match_status", "MATCH")
         )
 
-    # Compute exact similarity between crops for explainable verification
+    # Compute measured similarity between crops for explainable verification
     emb_a = reid_service.extract_reid_embedding(crop_a)
     emb_b = reid_service.extract_reid_embedding(crop_b)
     measured_sim = reid_service.compute_similarity(emb_a["vector_np"], emb_b["vector_np"])
 
+    match_status = match_info.get("match_status", "MATCH" if is_handoff else "NO_MATCH") if match_info else "NO_MATCH"
+
     return {
         "success": True,
         "is_matched": is_handoff,
+        "match_status": match_status,
         "global_track_id": gid_b,
         "camera_a": payload.from_camera,
         "camera_b": payload.to_camera,
         "transit_seconds": payload.transit_seconds,
         "measured_similarity": round(measured_sim, 3),
         "similarity_threshold": reid_service.similarity_threshold,
+        "uncertainty_threshold": reid_service.uncertainty_threshold,
         "match_confidence_pct": round(measured_sim * 100, 1),
         "camera_a_snapshot_b64": encode_crop_to_base64(crop_a),
         "camera_b_snapshot_b64": encode_crop_to_base64(crop_b),
         "camera_a_timestamp": time_a,
         "camera_b_timestamp": time_b,
-        "threat_elevated": is_handoff,
+        "match_info": match_info,
         "message": (
-            f"Successfully associated {gid_b} across {payload.from_camera} -> {payload.to_camera} "
-            f"with {round(measured_sim * 100, 1)}% appearance similarity."
+            f"Associated {gid_b} across {payload.from_camera} -> {payload.to_camera} "
+            f"(Similarity: {round(measured_sim * 100, 1)}%, Status: {match_status})."
             if is_handoff else
-            f"Distinct identity assigned ({gid_b}) — appearance similarity {round(measured_sim * 100, 1)}% "
-            f"was below the {round(reid_service.similarity_threshold * 100, 1)}% threshold."
+            f"Identity separated ({gid_b}) — appearance similarity {round(measured_sim * 100, 1)}% "
+            f"(Status: {match_status})."
         )
     }

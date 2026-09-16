@@ -1,58 +1,250 @@
-// TEJAS API Client Service with Automatic Local Fallback
+// TEJAS API Client Service with Authentication & Real Endpoints
+
+import { authService } from './auth';
 
 const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
 
+function getAuthHeaders(extra = {}) {
+  const headers = { ...extra };
+  const token = authService.getToken();
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  return headers;
+}
+
 export const apiClient = {
-  async getCameras() {
+  // ── Authentication Profile ──────────────────────────────
+  async getCurrentUser() {
     try {
-      const res = await fetch(`${BASE_URL}/cameras`);
+      const res = await fetch(`${BASE_URL}/auth/me`, {
+        headers: getAuthHeaders()
+      });
       if (res.ok) return await res.json();
     } catch (e) {
-      console.warn("Backend API unavailable, using simulated data");
+      console.warn("apiClient.getCurrentUser failed:", e);
     }
     return null;
   },
 
+  async getUsers() {
+    try {
+      const res = await fetch(`${BASE_URL}/auth/users`, {
+        headers: getAuthHeaders()
+      });
+      if (res.ok) return await res.json();
+    } catch (e) {
+      console.warn("apiClient.getUsers failed:", e);
+    }
+    return [];
+  },
+
+  // ── Camera Endpoints & Lifecycle ─────────────────────────
+  async getCameras() {
+    try {
+      const res = await fetch(`${BASE_URL}/cameras`, {
+        headers: getAuthHeaders()
+      });
+      if (res.ok) return await res.json();
+    } catch (e) {
+      console.warn("Backend API unavailable for getCameras");
+    }
+    return null;
+  },
+
+  async probeCamera(sourceUrl, streamType = 'RTSP') {
+    try {
+      const res = await fetch(`${BASE_URL}/cameras/probe`, {
+        method: 'POST',
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ source_url: sourceUrl, stream_type: streamType })
+      });
+      return await res.json();
+    } catch (e) {
+      return { reachable: false, error: e.message || "Network unreachable" };
+    }
+  },
+
+  async createCamera(cameraData) {
+    const res = await fetch(`${BASE_URL}/cameras`, {
+      method: 'POST',
+      headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify(cameraData)
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: "Failed to create camera" }));
+      throw new Error(err.detail || "Failed to create camera");
+    }
+    return await res.json();
+  },
+
+  async updateCamera(cameraId, cameraData) {
+    const res = await fetch(`${BASE_URL}/cameras/${cameraId}`, {
+      method: 'PUT',
+      headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify(cameraData)
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: "Failed to update camera" }));
+      throw new Error(err.detail || "Failed to update camera");
+    }
+    return await res.json();
+  },
+
+  async deleteCamera(cameraId) {
+    const res = await fetch(`${BASE_URL}/cameras/${cameraId}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders()
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: "Failed to delete camera" }));
+      throw new Error(err.detail || "Failed to delete camera");
+    }
+    return await res.json();
+  },
+
+  async startCamera(cameraId) {
+    const res = await fetch(`${BASE_URL}/cameras/${cameraId}/start`, {
+      method: 'POST',
+      headers: getAuthHeaders()
+    });
+    if (!res.ok) throw new Error("Failed to start camera");
+    return await res.json();
+  },
+
+  async stopCamera(cameraId) {
+    const res = await fetch(`${BASE_URL}/cameras/${cameraId}/stop`, {
+      method: 'POST',
+      headers: getAuthHeaders()
+    });
+    if (!res.ok) throw new Error("Failed to stop camera");
+    return await res.json();
+  },
+
+  async restartCamera(cameraId) {
+    const res = await fetch(`${BASE_URL}/cameras/${cameraId}/restart`, {
+      method: 'POST',
+      headers: getAuthHeaders()
+    });
+    if (!res.ok) throw new Error("Failed to restart camera");
+    return await res.json();
+  },
+
+  // ── Zones Endpoints ─────────────────────────────────────
+  async getZones() {
+    try {
+      const res = await fetch(`${BASE_URL}/zones`, {
+        headers: getAuthHeaders()
+      });
+      if (res.ok) return await res.json();
+    } catch (e) {
+      console.warn("Backend API unavailable for getZones");
+    }
+    return [];
+  },
+
+  async getZone(zoneId) {
+    try {
+      const res = await fetch(`${BASE_URL}/zones/${zoneId}`, {
+        headers: getAuthHeaders()
+      });
+      if (res.ok) return await res.json();
+    } catch (e) {
+      console.warn("Backend API unavailable for getZone");
+    }
+    return null;
+  },
+
+  async createZone(zoneData) {
+    const res = await fetch(`${BASE_URL}/zones`, {
+      method: 'POST',
+      headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify(zoneData)
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: "Failed to create zone" }));
+      throw new Error(err.detail || "Failed to create zone");
+    }
+    return await res.json();
+  },
+
+  async updateZone(zoneId, zoneData) {
+    const res = await fetch(`${BASE_URL}/zones/${zoneId}`, {
+      method: 'PUT',
+      headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify(zoneData)
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: "Failed to update zone" }));
+      throw new Error(err.detail || "Failed to update zone");
+    }
+    return await res.json();
+  },
+
+  async deleteZone(zoneId) {
+    const res = await fetch(`${BASE_URL}/zones/${zoneId}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders()
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: "Failed to delete zone" }));
+      throw new Error(err.detail || "Failed to delete zone");
+    }
+    return await res.json();
+  },
+
+  // ── ANPR Endpoints ───────────────────────────────────────
   async restorePlate(plateNumber, intensity = 0.75) {
     try {
       const res = await fetch(`${BASE_URL}/anpr/restore`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ plate_number: plateNumber, intensity })
       });
       if (res.ok) return await res.json();
     } catch (e) {
-      console.warn("Backend API unavailable, using simulated data");
+      console.warn("Backend API unavailable for restorePlate");
     }
     return null;
   },
 
-  async calculateThreat(factors, customWeights = null) {
-    try {
-      const res = await fetch(`${BASE_URL}/threat-rules/calculate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ factors, custom_weights: customWeights })
-      });
-      if (res.ok) return await res.json();
-    } catch (e) {
-      console.warn("Backend API unavailable, using simulated data");
-    }
-    return null;
-  },
-
+  // ── Events & Incidents ──────────────────────────────────
   async ingestEvent(eventData) {
     try {
       const res = await fetch(`${BASE_URL}/events`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(eventData)
       });
       if (res.ok) return await res.json();
     } catch (e) {
-      console.warn("Backend API unavailable, using simulated data");
+      console.warn("Backend API unavailable for ingestEvent");
     }
     return null;
+  },
+
+  async getEvents(limit = 40) {
+    try {
+      const res = await fetch(`${BASE_URL}/events?limit=${limit}`, {
+        headers: getAuthHeaders()
+      });
+      if (res.ok) return await res.json();
+    } catch (e) {
+      console.warn("Backend API unavailable for getEvents");
+    }
+    return [];
+  },
+
+  async getAlerts() {
+    try {
+      const res = await fetch(`${BASE_URL}/alerts`, {
+        headers: getAuthHeaders()
+      });
+      if (res.ok) return await res.json();
+    } catch (e) {
+      console.warn("Backend API unavailable for getAlerts");
+    }
+    return [];
   },
 
   async getIncidents(status = null, severity = null) {
@@ -61,7 +253,9 @@ export const apiClient = {
       if (status && status !== 'ALL') params.append('status', status);
       if (severity && severity !== 'ALL') params.append('severity', severity);
       const url = `${BASE_URL}/incidents${params.toString() ? '?' + params.toString() : ''}`;
-      const res = await fetch(url);
+      const res = await fetch(url, {
+        headers: getAuthHeaders()
+      });
       if (res.ok) return await res.json();
     } catch (e) {
       console.warn("Backend API unavailable for getIncidents");
@@ -71,7 +265,9 @@ export const apiClient = {
 
   async getIncidentDetail(incidentId) {
     try {
-      const res = await fetch(`${BASE_URL}/incidents/${incidentId}`);
+      const res = await fetch(`${BASE_URL}/incidents/${incidentId}`, {
+        headers: getAuthHeaders()
+      });
       if (res.ok) return await res.json();
     } catch (e) {
       console.warn("Backend API unavailable for getIncidentDetail");
@@ -83,7 +279,7 @@ export const apiClient = {
     try {
       const res = await fetch(`${BASE_URL}/incidents/${incidentId}/action`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ 
           status, 
           user, 
@@ -102,7 +298,7 @@ export const apiClient = {
     try {
       const res = await fetch(`${BASE_URL}/incidents/${incidentId}/notes`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ note, user })
       });
       if (res.ok) return await res.json();
@@ -116,7 +312,7 @@ export const apiClient = {
     try {
       const res = await fetch(`${BASE_URL}/incidents/test-trigger`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(payload)
       });
       if (res.ok) return await res.json();
@@ -126,32 +322,39 @@ export const apiClient = {
     return null;
   },
 
+  // ── Global Tracking & Re-ID ─────────────────────────────
   async getGlobalTracks() {
     try {
-      const res = await fetch(`${BASE_URL}/tracking/global-tracks`);
+      const res = await fetch(`${BASE_URL}/tracking/global-tracks`, {
+        headers: getAuthHeaders()
+      });
       if (res.ok) return await res.json();
     } catch (e) {
-      console.warn("Backend API unavailable");
+      console.warn("Backend API unavailable for getGlobalTracks");
     }
     return [];
   },
 
   async getGlobalTrackDetail(trackId) {
     try {
-      const res = await fetch(`${BASE_URL}/tracking/global-tracks/${trackId}`);
+      const res = await fetch(`${BASE_URL}/tracking/global-tracks/${trackId}`, {
+        headers: getAuthHeaders()
+      });
       if (res.ok) return await res.json();
     } catch (e) {
-      console.warn("Backend API unavailable");
+      console.warn("Backend API unavailable for getGlobalTrackDetail");
     }
     return null;
   },
 
   async getTrackingConfig() {
     try {
-      const res = await fetch(`${BASE_URL}/tracking/config`);
+      const res = await fetch(`${BASE_URL}/tracking/config`, {
+        headers: getAuthHeaders()
+      });
       if (res.ok) return await res.json();
     } catch (e) {
-      console.warn("Backend API unavailable");
+      console.warn("Backend API unavailable for getTrackingConfig");
     }
     return { similarity_threshold: 0.72, max_transit_seconds: 180.0 };
   },
@@ -160,7 +363,7 @@ export const apiClient = {
     try {
       const res = await fetch(`${BASE_URL}/tracking/config`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({
           similarity_threshold: similarityThreshold,
           max_transit_seconds: maxTransitSeconds
@@ -168,7 +371,38 @@ export const apiClient = {
       });
       if (res.ok) return await res.json();
     } catch (e) {
-      console.warn("Backend API unavailable");
+      console.warn("Backend API unavailable for updateTrackingConfig");
+    }
+    return null;
+  },
+
+  async getTopology() {
+    try {
+      const res = await fetch(`${BASE_URL}/tracking/topology`, {
+        headers: getAuthHeaders()
+      });
+      if (res.ok) return await res.json();
+    } catch (e) {
+      console.warn("Backend API unavailable for getTopology");
+    }
+    return { registered_cameras: [], corridors: [] };
+  },
+
+  async addCorridor(fromCam, toCam, minTransit = 5.0, maxTransit = 180.0) {
+    try {
+      const res = await fetch(`${BASE_URL}/tracking/topology/corridor`, {
+        method: 'POST',
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({
+          from_camera: fromCam,
+          to_camera: toCam,
+          min_transit_seconds: minTransit,
+          max_transit_seconds: maxTransit
+        })
+      });
+      if (res.ok) return await res.json();
+    } catch (e) {
+      console.warn("Backend API unavailable for addCorridor");
     }
     return null;
   },
@@ -177,20 +411,22 @@ export const apiClient = {
     try {
       const res = await fetch(`${BASE_URL}/tracking/simulate-transit`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(payload)
       });
       if (res.ok) return await res.json();
     } catch (e) {
-      console.warn("Backend API unavailable");
+      console.warn("Backend API unavailable for simulateTransit");
     }
     return null;
   },
 
-  // Face Recognition Subsystem APIs
+  // ── Face Recognition Subsystem APIs ───────────────────────
   async getFaceConfig() {
     try {
-      const res = await fetch(`${BASE_URL}/face/config`);
+      const res = await fetch(`${BASE_URL}/face/config`, {
+        headers: getAuthHeaders()
+      });
       if (res.ok) return await res.json();
     } catch (e) {
       console.warn("Backend API unavailable for getFaceConfig");
@@ -202,7 +438,7 @@ export const apiClient = {
     try {
       const res = await fetch(`${BASE_URL}/face/config`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(payload)
       });
       if (res.ok) return await res.json();
@@ -217,7 +453,9 @@ export const apiClient = {
       const url = category && category !== 'ALL' 
         ? `${BASE_URL}/face/enrolled?category=${encodeURIComponent(category)}`
         : `${BASE_URL}/face/enrolled`;
-      const res = await fetch(url);
+      const res = await fetch(url, {
+        headers: getAuthHeaders()
+      });
       if (res.ok) return await res.json();
     } catch (e) {
       console.warn("Backend API unavailable for getEnrolledFaces");
@@ -226,25 +464,23 @@ export const apiClient = {
   },
 
   async enrollFace(payload) {
-    try {
-      const res = await fetch(`${BASE_URL}/face/enrolled`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-      if (res.ok) return await res.json();
+    const res = await fetch(`${BASE_URL}/face/enrolled`, {
+      method: 'POST',
+      headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) {
       const err = await res.json().catch(() => ({ detail: "Enrollment failed" }));
       throw new Error(err.detail || "Enrollment failed");
-    } catch (e) {
-      console.warn("Error in enrollFace:", e);
-      throw e;
     }
+    return await res.json();
   },
 
   async deleteEnrolledFace(faceId, user = 'Duty Operator') {
     try {
       const res = await fetch(`${BASE_URL}/face/enrolled/${faceId}?user=${encodeURIComponent(user)}`, {
-        method: 'DELETE'
+        method: 'DELETE',
+        headers: getAuthHeaders()
       });
       if (res.ok) return await res.json();
     } catch (e) {
@@ -257,7 +493,7 @@ export const apiClient = {
     try {
       const res = await fetch(`${BASE_URL}/face/recognize`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(payload)
       });
       if (res.ok) return await res.json();
@@ -267,10 +503,12 @@ export const apiClient = {
     return null;
   },
 
-  // Watchlist Endpoints
+  // ── Watchlist Endpoints ───────────────────────────────────
   async getWatchlist() {
     try {
-      const res = await fetch(`${BASE_URL}/watchlist`);
+      const res = await fetch(`${BASE_URL}/watchlist`, {
+        headers: getAuthHeaders()
+      });
       if (res.ok) return await res.json();
     } catch (e) {
       console.warn("Backend API unavailable for getWatchlist");
@@ -282,7 +520,7 @@ export const apiClient = {
     try {
       const res = await fetch(`${BASE_URL}/watchlist`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(entry)
       });
       if (res.ok) return await res.json();
@@ -295,7 +533,8 @@ export const apiClient = {
   async deleteWatchlistEntry(id) {
     try {
       const res = await fetch(`${BASE_URL}/watchlist/${id}`, {
-        method: 'DELETE'
+        method: 'DELETE',
+        headers: getAuthHeaders()
       });
       if (res.ok) return await res.json();
     } catch (e) {
@@ -304,10 +543,12 @@ export const apiClient = {
     return null;
   },
 
-  // Analytics, Zones, Alerts & Events Endpoints
+  // ── Analytics ────────────────────────────────────────────
   async getAnalyticsSummary() {
     try {
-      const res = await fetch(`${BASE_URL}/analytics/summary`);
+      const res = await fetch(`${BASE_URL}/analytics/summary`, {
+        headers: getAuthHeaders()
+      });
       if (res.ok) return await res.json();
     } catch (e) {
       console.warn("Backend API unavailable for getAnalyticsSummary");
@@ -317,7 +558,9 @@ export const apiClient = {
 
   async getHourlyAnalytics() {
     try {
-      const res = await fetch(`${BASE_URL}/analytics/hourly`);
+      const res = await fetch(`${BASE_URL}/analytics/hourly`, {
+        headers: getAuthHeaders()
+      });
       if (res.ok) return await res.json();
     } catch (e) {
       console.warn("Backend API unavailable for getHourlyAnalytics");
@@ -327,7 +570,9 @@ export const apiClient = {
 
   async getCameraHotspots() {
     try {
-      const res = await fetch(`${BASE_URL}/analytics/hotspots`);
+      const res = await fetch(`${BASE_URL}/analytics/hotspots`, {
+        headers: getAuthHeaders()
+      });
       if (res.ok) return await res.json();
     } catch (e) {
       console.warn("Backend API unavailable for getCameraHotspots");
@@ -335,39 +580,12 @@ export const apiClient = {
     return [];
   },
 
-  async getZones() {
-    try {
-      const res = await fetch(`${BASE_URL}/zones`);
-      if (res.ok) return await res.json();
-    } catch (e) {
-      console.warn("Backend API unavailable for getZones");
-    }
-    return [];
-  },
-
-  async getAlerts() {
-    try {
-      const res = await fetch(`${BASE_URL}/alerts`);
-      if (res.ok) return await res.json();
-    } catch (e) {
-      console.warn("Backend API unavailable for getAlerts");
-    }
-    return [];
-  },
-
-  async getEvents(limit = 40) {
-    try {
-      const res = await fetch(`${BASE_URL}/events?limit=${limit}`);
-      if (res.ok) return await res.json();
-    } catch (e) {
-      console.warn("Backend API unavailable for getEvents");
-    }
-    return [];
-  },
-
+  // ── Operational Threat Rules ─────────────────────────────
   async getThreatRules() {
     try {
-      const res = await fetch(`${BASE_URL}/threat-rules`);
+      const res = await fetch(`${BASE_URL}/threat-rules`, {
+        headers: getAuthHeaders()
+      });
       if (res.ok) return await res.json();
     } catch (e) {
       console.warn("Backend API unavailable for getThreatRules");
@@ -379,7 +597,7 @@ export const apiClient = {
     try {
       const res = await fetch(`${BASE_URL}/threat-rules/${ruleId}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ weight, enabled })
       });
       if (res.ok) return await res.json();

@@ -1,8 +1,15 @@
-import React, { useState, useEffect } from 'react';
-import { MapPin, Plus, Trash2, Edit3, Shield, AlertTriangle, Layers, Save, Video } from 'lucide-react';
-import { VIRTUAL_ZONES, CAMERAS } from '../data/mockData';
+import React, { useState, useEffect, useRef } from 'react';
+import { MapPin, Plus, Trash2, Layers, Save, Video, CheckCircle, AlertTriangle } from 'lucide-react';
+import { apiClient } from '../services/api';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
+const ZONE_TYPE_METRICS = {
+  RESTRICTED: { level: 'ALERT', color: '#DC2626', desc: 'Immediate intrusion alert generated', badgeBg: 'bg-red-50 text-red-700 border-red-200' },
+  SENSITIVE: { level: 'NOTICE', color: '#D97706', desc: 'Tactical advisory on unauthorized dwell', badgeBg: 'bg-amber-50 text-amber-700 border-amber-200' },
+  BORDER: { level: 'PRIORITY', color: '#7C3AED', desc: 'High-priority perimeter breach alarm', badgeBg: 'bg-purple-50 text-purple-700 border-purple-200' },
+  ENTRY: { level: 'INFO', color: '#059669', desc: 'Standard checkpoint access logging', badgeBg: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+  EXIT: { level: 'INFO', color: '#2563EB', desc: 'Egress monitoring', badgeBg: 'bg-blue-50 text-blue-700 border-blue-200' },
+  CUSTOM: { level: 'NOTICE', color: '#4B5563', desc: 'Custom ruleset evaluation', badgeBg: 'bg-slate-100 text-slate-700 border-slate-200' }
+};
 
 export default function Zones() {
   const [zones, setZones] = useState([]);
@@ -12,62 +19,45 @@ export default function Zones() {
   const [isAddingZone, setIsAddingZone] = useState(false);
   const [newZoneName, setNewZoneName] = useState('');
   const [newZoneType, setNewZoneType] = useState('RESTRICTED');
-  const [newZoneWeight, setNewZoneWeight] = useState(30);
   const [isSaving, setIsSaving] = useState(false);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState(false);
+  const [showLiveFeed, setShowLiveFeed] = useState(true);
+
+  // SVG interaction
+  const svgRef = useRef(null);
+  const [draggingNode, setDraggingNode] = useState(null);
 
   const fetchZonesAndCameras = async () => {
     try {
-      const [zRes, cRes] = await Promise.all([
-        fetch(`${API_BASE}/zones`),
-        fetch(`${API_BASE}/cameras`)
+      const [zData, cData] = await Promise.all([
+        apiClient.getZones(),
+        apiClient.getCameras()
       ]);
 
-      let loadedZones = [];
-      if (zRes.ok) {
-        const raw = await zRes.json();
-        loadedZones = raw.map(z => ({
-          id: z.id,
-          name: z.name,
-          type: z.type,
-          color: z.color || '#EF4444',
-          cameraCode: z.camera_code || 'CAM-00',
-          threatWeight: z.threat_weight || 30,
-          points: z.points_json || [
-            { x: 15, y: 25 },
-            { x: 85, y: 25 },
-            { x: 85, y: 85 },
-            { x: 15, y: 85 }
-          ],
-          ruleTriggers: z.rule_triggers || ["Intrusion"]
-        }));
-      }
+      const loadedZones = (zData || []).map(z => ({
+        id: z.id,
+        name: z.name,
+        type: z.type,
+        color: z.color || ZONE_TYPE_METRICS[z.type]?.color || '#DC2626',
+        cameraCode: z.camera_code || 'CAM-00',
+        points: Array.isArray(z.points_json) && z.points_json.length >= 3 
+          ? z.points_json 
+          : [{ x: 15, y: 25 }, { x: 85, y: 25 }, { x: 85, y: 85 }, { x: 15, y: 85 }],
+        ruleTriggers: z.rule_triggers || ["Intrusion"]
+      }));
 
-      if (loadedZones.length === 0) {
-        loadedZones = VIRTUAL_ZONES;
-      }
       setZones(loadedZones);
       if (loadedZones.length > 0) {
         setSelectedZone(loadedZones[0]);
       }
 
-      let loadedCameras = [];
-      if (cRes.ok) {
-        loadedCameras = await cRes.json();
-      }
-      // Ensure CAM-00 is in the camera list
-      const hasWebcam = loadedCameras.some(c => c.code === 'CAM-00');
-      if (!hasWebcam) {
-        loadedCameras = [
-          { id: 'CAM-00', code: 'CAM-00', name: 'Primary Laptop Webcam' },
-          ...loadedCameras
-        ];
-      }
-      setCameras(loadedCameras.length > 0 ? loadedCameras : CAMERAS);
+      const loadedCams = (cData || []);
+      const hasCam00 = loadedCams.some(c => c.code === 'CAM-00');
+      const allCams = hasCam00 ? loadedCams : [{ id: 'CAM-00', code: 'CAM-00', name: 'Primary Camera' }, ...loadedCams];
+      setCameras(allCams);
     } catch (err) {
-      console.warn("Failed to fetch zones from backend, using fallback:", err);
-      setZones(VIRTUAL_ZONES);
-      setSelectedZone(VIRTUAL_ZONES[0]);
-      setCameras(CAMERAS);
+      console.warn("Error fetching zones/cameras:", err);
     }
   };
 
@@ -75,223 +65,296 @@ export default function Zones() {
     fetchZonesAndCameras();
   }, []);
 
+  const handlePointerDown = (pIdx, e) => {
+    e.stopPropagation();
+    setDraggingNode(pIdx);
+  };
+
+  const handlePointerMove = (e) => {
+    if (draggingNode === null || !selectedZone || !svgRef.current) return;
+    
+    const rect = svgRef.current.getBoundingClientRect();
+    const clientX = e.clientX ?? (e.touches && e.touches[0]?.clientX);
+    const clientY = e.clientY ?? (e.touches && e.touches[0]?.clientY);
+    if (clientX === undefined || clientY === undefined) return;
+
+    const rawX = ((clientX - rect.left) / rect.width) * 100;
+    const rawY = ((clientY - rect.top) / rect.height) * 100;
+
+    const clampedX = Math.round(Math.max(0, Math.min(100, rawX)));
+    const clampedY = Math.round(Math.max(0, Math.min(100, rawY)));
+
+    setSelectedZone(prev => {
+      if (!prev) return prev;
+      const updatedPts = prev.points.map((pt, idx) => 
+        idx === draggingNode ? { x: clampedX, y: clampedY } : pt
+      );
+      return { ...prev, points: updatedPts };
+    });
+
+    setZones(prev => prev.map(z => {
+      if (z.id !== selectedZone.id) return z;
+      const updatedPts = z.points.map((pt, idx) => 
+        idx === draggingNode ? { x: clampedX, y: clampedY } : pt
+      );
+      return { ...z, points: updatedPts };
+    }));
+
+    setHasUnsavedChanges(true);
+    setSaveSuccess(false);
+  };
+
+  const handlePointerUp = () => {
+    setDraggingNode(null);
+  };
+
+  const handleSaveCoordinates = async () => {
+    if (!selectedZone) return;
+    setIsSaving(true);
+    try {
+      await apiClient.updateZone(selectedZone.id, {
+        points_json: selectedZone.points
+      });
+      setHasUnsavedChanges(false);
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 3000);
+    } catch (err) {
+      console.error("Failed to update zone polygon:", err);
+      alert("Error saving zone coordinates: " + (err.message || "Failed"));
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   const handleAddZone = async (e) => {
     e.preventDefault();
-    if (!newZoneName) return;
+    if (!newZoneName.trim()) return;
 
-    const colors = {
-      RESTRICTED: '#EF4444',
-      SENSITIVE: '#F59E0B',
-      BORDER: '#06B6D4',
-      ENTRY: '#10B981',
-      EXIT: '#3B82F6',
-      CUSTOM: '#8B5CF6'
-    };
+    const meta = ZONE_TYPE_METRICS[newZoneType] || ZONE_TYPE_METRICS.RESTRICTED;
 
     const zonePayload = {
-      name: newZoneName,
+      name: newZoneName.trim(),
       type: newZoneType,
-      color: colors[newZoneType] || '#EF4444',
+      color: meta.color,
       camera_code: selectedCamera,
-      threat_weight: Number(newZoneWeight),
+      threat_weight: 0,
       points_json: [
         { x: 20, y: 20 },
         { x: 80, y: 20 },
         { x: 80, y: 80 },
         { x: 20, y: 80 }
       ],
-      rule_triggers: ["Virtual Fence Intrusion"]
+      rule_triggers: [`${newZoneType} Perimeter Violation`]
     };
 
     setIsSaving(true);
     try {
-      const res = await fetch(`${API_BASE}/zones`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(zonePayload)
-      });
-
-      if (res.ok) {
-        const created = await res.json();
-        const mapped = {
-          id: created.id,
-          name: created.name,
-          type: created.type,
-          color: created.color,
-          cameraCode: created.camera_code,
-          threatWeight: created.threat_weight,
-          points: created.points_json,
-          ruleTriggers: created.rule_triggers
-        };
-        setZones(prev => [...prev, mapped]);
-        setSelectedZone(mapped);
-      }
-    } catch (err) {
-      console.error("Error creating zone:", err);
-    } finally {
-      setIsSaving(false);
+      const created = await apiClient.createZone(zonePayload);
+      const mapped = {
+        id: created.id,
+        name: created.name,
+        type: created.type,
+        color: created.color || meta.color,
+        cameraCode: created.camera_code,
+        points: created.points_json || zonePayload.points_json,
+        ruleTriggers: created.rule_triggers
+      };
+      setZones(prev => [...prev, mapped]);
+      setSelectedZone(mapped);
       setIsAddingZone(false);
       setNewZoneName('');
+    } catch (err) {
+      console.error("Error creating zone:", err);
+      alert("Failed to create zone: " + (err.message || "Error"));
+    } finally {
+      setIsSaving(false);
     }
   };
 
   const handleDeleteZone = async (zoneId) => {
+    if (!confirm("Are you sure you want to delete this security zone?")) return;
     try {
-      await fetch(`${API_BASE}/zones/${zoneId}`, { method: 'DELETE' });
+      await apiClient.deleteZone(zoneId);
+      const updated = zones.filter(z => z.id !== zoneId);
+      setZones(updated);
+      if (selectedZone?.id === zoneId) {
+        setSelectedZone(updated.length > 0 ? updated[0] : null);
+      }
     } catch (err) {
       console.error("Error deleting zone:", err);
-    }
-    const updated = zones.filter(z => z.id !== zoneId);
-    setZones(updated);
-    if (selectedZone?.id === zoneId && updated.length > 0) {
-      setSelectedZone(updated[0]);
+      alert("Failed to delete zone: " + (err.message || "Error"));
     }
   };
 
-
   return (
-    <div className="space-y-4 p-4 max-w-[1920px] mx-auto">
-      {/* Top Banner */}
-      <div className="tactical-card p-4 rounded-xl border border-[#1E2D48] flex flex-col md:flex-row md:items-center justify-between gap-4">
+    <div 
+      className="space-y-5 select-none"
+      onPointerUp={handlePointerUp}
+      onPointerLeave={handlePointerUp}
+    >
+      {/* Page Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2">
-            <MapPin className="w-5 h-5 text-cyan-400" />
-            <h1 className="text-base font-bold uppercase tracking-wider text-slate-100 font-mono">
-              Virtual Fence & Polygonal Security Zones
-            </h1>
-          </div>
-          <p className="text-xs text-slate-400 mt-1">
-            Define spatial boundaries, restricted perimeters, and directional tripwires calibrated to individual CCTV feeds.
+          <h1 className="text-xl font-bold text-slate-900 tracking-tight flex items-center gap-2">
+            <MapPin className="w-5 h-5 text-blue-600" />
+            Security Zones & Virtual Boundaries
+          </h1>
+          <p className="text-sm text-slate-500 mt-0.5">
+            Configure polygonal surveillance perimeters. Coordinate boundaries synchronize with the real-time detection pipeline.
           </p>
         </div>
 
-        <button
-          onClick={() => setIsAddingZone(true)}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white font-mono text-xs font-semibold shadow-lg shadow-cyan-600/30 transition-all"
-        >
-          <Plus className="w-3.5 h-3.5" />
-          <span>Add New Polygon Zone</span>
-        </button>
+        <div className="flex items-center gap-2.5">
+          <button
+            onClick={() => setShowLiveFeed(!showLiveFeed)}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium border transition-colors ${
+              showLiveFeed 
+                ? 'bg-blue-50 border-blue-200 text-blue-700' 
+                : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50'
+            }`}
+          >
+            <Video className="w-3.5 h-3.5" />
+            <span>{showLiveFeed ? 'Video Background: On' : 'Video Background: Off'}</span>
+          </button>
+
+          <button
+            onClick={() => setIsAddingZone(true)}
+            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-md bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold shadow-sm transition-colors"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Add Zone</span>
+          </button>
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
-        {/* Left 4 Cols: Zone List */}
-        <div className="lg:col-span-4 space-y-3">
-          <div className="tactical-card rounded-xl p-4 border border-[#1E2D48]">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-200 font-mono mb-3">
-              CONFIGURED ZONES ({zones.length})
-            </h3>
-
-            <div className="space-y-2">
-              {zones.map((zone) => {
-                const isSelected = selectedZone?.id === zone.id;
-                return (
-                  <div
-                    key={zone.id}
-                    onClick={() => setSelectedZone(zone)}
-                    className={`p-3 rounded-lg border cursor-pointer transition-all ${
-                      isSelected
-                        ? 'bg-slate-800/80 border-cyan-500/60 shadow-md shadow-cyan-500/10'
-                        : 'bg-[#0E1524] border-slate-800 hover:border-slate-700'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between mb-1">
-                      <div className="flex items-center gap-2">
-                        <span 
-                          className="w-2.5 h-2.5 rounded-full" 
-                          style={{ backgroundColor: zone.color }} 
-                        />
-                        <span className="font-bold text-xs text-slate-200">{zone.name}</span>
-                      </div>
-                      <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-900 border border-slate-700 text-slate-300">
-                        {zone.type}
-                      </span>
-                    </div>
-
-                    <div className="flex items-center justify-between text-[11px] font-mono text-slate-400 mt-2">
-                      <span>Camera: <strong className="text-slate-200">{zone.cameraCode}</strong></span>
-                      <span className="font-bold" style={{ color: zone.color }}>
-                        +{zone.threatWeight} THREAT
-                      </span>
-                    </div>
-                  </div>
-                );
-              })}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+        {/* Left Column: Zone List & Add Form */}
+        <div className="lg:col-span-4 space-y-4">
+          <div className="bg-white rounded-lg border border-slate-200 shadow-sm p-4">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-3">
+              <h2 className="text-xs font-bold uppercase tracking-wider text-slate-700">
+                Configured Zones ({zones.length})
+              </h2>
             </div>
+
+            {zones.length === 0 ? (
+              <div className="text-center py-8 text-slate-500 text-xs">
+                <MapPin className="w-7 h-7 text-slate-300 mx-auto mb-2" />
+                <p>No perimeter zones defined yet.</p>
+                <button
+                  onClick={() => setIsAddingZone(true)}
+                  className="mt-2 text-blue-600 hover:text-blue-700 font-medium"
+                >
+                  Create your first zone
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {zones.map((zone) => {
+                  const isSelected = selectedZone?.id === zone.id;
+                  const meta = ZONE_TYPE_METRICS[zone.type] || ZONE_TYPE_METRICS.RESTRICTED;
+
+                  return (
+                    <div
+                      key={zone.id}
+                      onClick={() => {
+                        setSelectedZone(zone);
+                        setHasUnsavedChanges(false);
+                      }}
+                      className={`p-3 rounded-lg border cursor-pointer transition-all ${
+                        isSelected
+                          ? 'bg-blue-50/60 border-blue-400 shadow-sm'
+                          : 'bg-white border-slate-200 hover:border-slate-300 hover:bg-slate-50/50'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between mb-1.5">
+                        <div className="flex items-center gap-2">
+                          <span 
+                            className="w-2.5 h-2.5 rounded-full" 
+                            style={{ backgroundColor: zone.color }} 
+                          />
+                          <span className="font-semibold text-xs text-slate-900">{zone.name}</span>
+                        </div>
+                        <span className={`text-[10px] font-medium px-2 py-0.5 rounded border ${meta.badgeBg}`}>
+                          {zone.type}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-between text-xs text-slate-500">
+                        <span>Camera: <strong className="text-slate-700 font-medium">{zone.cameraCode}</strong></span>
+                        <span className="text-[11px] font-medium" style={{ color: zone.color }}>
+                          {meta.level}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
-          {/* Add Zone Modal / Form */}
+          {/* Add Zone Panel */}
           {isAddingZone && (
-            <div className="tactical-card rounded-xl p-4 border border-cyan-500/40">
-              <h4 className="text-xs font-bold uppercase text-cyan-400 font-mono mb-3">
-                Create Virtual Fence Boundary
-              </h4>
+            <div className="bg-white rounded-lg border border-blue-200 shadow-sm p-4">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-800 mb-3">
+                Create Perimeter Zone
+              </h3>
               <form onSubmit={handleAddZone} className="space-y-3 text-xs">
                 <div>
-                  <label className="block text-slate-400 font-mono mb-1">Zone Name</label>
+                  <label className="block text-slate-600 font-medium mb-1">Zone Name</label>
                   <input
                     type="text"
                     required
                     value={newZoneName}
                     onChange={(e) => setNewZoneName(e.target.value)}
-                    placeholder="e.g. Sector B Ammunition Perimeter"
-                    className="w-full px-2.5 py-1.5 rounded bg-slate-900 border border-slate-700 text-slate-100 font-mono text-xs focus:outline-none focus:border-cyan-400"
+                    placeholder="e.g. Storage Area Perimeter"
+                    className="input-clean w-full text-xs"
                   />
                 </div>
 
                 <div className="grid grid-cols-2 gap-2">
                   <div>
-                    <label className="block text-slate-400 font-mono mb-1">Zone Type</label>
+                    <label className="block text-slate-600 font-medium mb-1">Zone Type</label>
                     <select
                       value={newZoneType}
                       onChange={(e) => setNewZoneType(e.target.value)}
-                      className="w-full px-2 py-1.5 rounded bg-slate-900 border border-slate-700 text-slate-100 font-mono text-xs"
+                      className="input-clean w-full text-xs"
                     >
-                      <option value="RESTRICTED">Restricted</option>
-                      <option value="SENSITIVE">Sensitive</option>
-                      <option value="BORDER">Border</option>
-                      <option value="ENTRY">Entry</option>
-                      <option value="EXIT">Exit</option>
-                      <option value="CUSTOM">Custom</option>
+                      <option value="RESTRICTED">Restricted (ALERT)</option>
+                      <option value="SENSITIVE">Sensitive (NOTICE)</option>
+                      <option value="BORDER">Border (PRIORITY)</option>
+                      <option value="ENTRY">Entry (INFO)</option>
+                      <option value="EXIT">Exit (INFO)</option>
+                      <option value="CUSTOM">Custom (NOTICE)</option>
                     </select>
                   </div>
 
                   <div>
-                    <label className="block text-slate-400 font-mono mb-1">Threat Delta</label>
-                    <input
-                      type="number"
-                      value={newZoneWeight}
-                      onChange={(e) => setNewZoneWeight(e.target.value)}
-                      className="w-full px-2 py-1.5 rounded bg-slate-900 border border-slate-700 text-slate-100 font-mono text-xs"
-                    />
+                    <label className="block text-slate-600 font-medium mb-1">Target Camera</label>
+                    <select
+                      value={selectedCamera}
+                      onChange={(e) => setSelectedCamera(e.target.value)}
+                      className="input-clean w-full text-xs"
+                    >
+                      {cameras.map(c => (
+                        <option key={c.id || c.code} value={c.code}>{c.code} — {c.name}</option>
+                      ))}
+                    </select>
                   </div>
-                </div>
-
-                <div>
-                  <label className="block text-slate-400 font-mono mb-1">Target Camera</label>
-                  <select
-                    value={selectedCamera}
-                    onChange={(e) => setSelectedCamera(e.target.value)}
-                    className="w-full px-2 py-1.5 rounded bg-slate-900 border border-slate-700 text-slate-100 font-mono text-xs"
-                  >
-                    {cameras.map(c => (
-                      <option key={c.id || c.code} value={c.code}>{c.code} — {c.name}</option>
-                    ))}
-
-                  </select>
                 </div>
 
                 <div className="flex items-center gap-2 pt-2">
                   <button
                     type="submit"
-                    className="flex-1 py-1.5 rounded bg-cyan-600 hover:bg-cyan-500 text-white font-mono text-xs font-bold"
+                    disabled={isSaving}
+                    className="flex-1 py-1.5 rounded-md bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-semibold shadow-sm transition-colors"
                   >
-                    Save Zone
+                    {isSaving ? 'Creating...' : 'Save Zone'}
                   </button>
                   <button
                     type="button"
                     onClick={() => setIsAddingZone(false)}
-                    className="px-3 py-1.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono text-xs"
+                    className="px-3 py-1.5 rounded-md border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 text-xs font-medium"
                   >
                     Cancel
                   </button>
@@ -301,89 +364,144 @@ export default function Zones() {
           )}
         </div>
 
-        {/* Right 8 Cols: Interactive Polygon Zone Canvas Preview */}
+        {/* Right Column: Interactive Polygon Zone Canvas */}
         <div className="lg:col-span-8 space-y-4">
-          <div className="tactical-card rounded-xl p-4 border border-[#1E2D48]">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-800 mb-3">
+          <div className="bg-white rounded-lg border border-slate-200 shadow-sm p-4">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-3">
               <div className="flex items-center gap-2">
-                <Layers className="w-4 h-4 text-cyan-400" />
-                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-200 font-mono">
-                  Polygon Boundary Editor: {selectedZone ? selectedZone.name : 'Select Zone'}
-                </h3>
+                <Layers className="w-4 h-4 text-blue-600" />
+                <h2 className="text-xs font-bold uppercase tracking-wider text-slate-800">
+                  Polygon Boundary Calibration: {selectedZone ? selectedZone.name : 'Select Zone'}
+                </h2>
               </div>
-              {selectedZone && (
-                <button
-                  onClick={() => handleDeleteZone(selectedZone.id)}
-                  className="flex items-center gap-1 px-2.5 py-1 text-xs rounded bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 transition-colors"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                  <span>Delete Zone</span>
-                </button>
-              )}
+
+              <div className="flex items-center gap-2">
+                {hasUnsavedChanges && (
+                  <button
+                    onClick={handleSaveCoordinates}
+                    disabled={isSaving}
+                    className="inline-flex items-center gap-1.5 px-3 py-1 text-xs rounded-md bg-emerald-600 hover:bg-emerald-700 text-white font-semibold shadow-sm transition-colors"
+                  >
+                    <Save className="w-3.5 h-3.5" />
+                    <span>{isSaving ? 'Saving...' : 'Save Coordinates'}</span>
+                  </button>
+                )}
+
+                {saveSuccess && (
+                  <div className="inline-flex items-center gap-1 text-xs font-medium text-emerald-700 px-2 py-1 bg-emerald-50 border border-emerald-200 rounded-md">
+                    <CheckCircle className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>Saved</span>
+                  </div>
+                )}
+
+                {selectedZone && (
+                  <button
+                    onClick={() => handleDeleteZone(selectedZone.id)}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded-md bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 transition-colors font-medium"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Delete</span>
+                  </button>
+                )}
+              </div>
             </div>
 
-            {/* Virtual Zone Visualizer Canvas */}
-            <div className="relative aspect-video bg-[#070B14] rounded-xl border border-slate-800 overflow-hidden flex items-center justify-center hud-grid">
+            {/* Virtual Zone Visualizer Viewport */}
+            <div className="relative aspect-video bg-slate-900 rounded-lg border border-slate-800 overflow-hidden flex items-center justify-center">
+              {/* Optional Camera Feed Background */}
+              {showLiveFeed && selectedZone && (
+                <img
+                  src={`http://localhost:8000/api/video/feed?camera_id=${encodeURIComponent(selectedZone.cameraCode)}`}
+                  alt="Camera Calibration Feed"
+                  className="absolute inset-0 w-full h-full object-cover opacity-70 pointer-events-none"
+                  onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                />
+              )}
+
               {/* Camera reference label */}
-              <div className="absolute top-3 left-3 text-[10px] font-mono text-slate-300 bg-black/70 px-2.5 py-1 rounded border border-slate-700">
-                CAMERA: {selectedZone?.cameraCode} (CALIBRATED COORDINATES)
+              <div className="absolute top-3 left-3 text-[11px] font-mono text-slate-200 bg-slate-900/90 px-2.5 py-1 rounded border border-slate-700 z-10">
+                CAMERA: {selectedZone?.cameraCode || 'N/A'} (CALIBRATED COORDINATES)
               </div>
 
-              {/* Scaled Polygon Overlay */}
-              <svg className="w-full h-full">
+              {/* SVG Interactive Canvas */}
+              <svg 
+                ref={svgRef}
+                viewBox="0 0 100 100"
+                preserveAspectRatio="none"
+                onPointerMove={handlePointerMove}
+                className="absolute inset-0 w-full h-full cursor-crosshair z-10"
+              >
                 {zones
                   .filter(z => z.cameraCode === selectedZone?.cameraCode)
                   .map((z) => {
-                    const pointsStr = z.points.map(p => `${p.x * 6.4},${p.y * 3.6}`).join(' ');
+                    const pointsStr = z.points.map(p => `${p.x},${p.y}`).join(' ');
                     const isSelected = z.id === selectedZone?.id;
 
                     return (
                       <g key={z.id}>
+                        {/* Polygon Fill & Outline */}
                         <polygon
                           points={pointsStr}
                           fill={z.color}
-                          fillOpacity={isSelected ? 0.25 : 0.1}
+                          fillOpacity={isSelected ? 0.30 : 0.12}
                           stroke={z.color}
-                          strokeWidth={isSelected ? 2.5 : 1.5}
-                          strokeDasharray={isSelected ? "6 3" : "none"}
+                          strokeWidth={isSelected ? 0.8 : 0.4}
+                          strokeDasharray={isSelected ? "2 1" : "none"}
                         />
-                        {/* Control vertex handles */}
+
+                        {/* Interactive Drag Handles */}
                         {isSelected && z.points.map((pt, pIdx) => (
-                          <circle
-                            key={pIdx}
-                            cx={pt.x * 6.4}
-                            cy={pt.y * 3.6}
-                            r={5}
-                            fill="#FFFFFF"
-                            stroke={z.color}
-                            strokeWidth={2}
-                            className="cursor-move"
-                          />
+                          <g key={pIdx}>
+                            <circle
+                              cx={pt.x}
+                              cy={pt.y}
+                              r={2.2}
+                              fill="#FFFFFF"
+                              stroke={z.color}
+                              strokeWidth={0.7}
+                              onPointerDown={(e) => handlePointerDown(pIdx, e)}
+                              className="cursor-move transition-transform hover:scale-125"
+                            />
+                            <text
+                              x={pt.x + 2.5}
+                              y={pt.y - 2.5}
+                              fill="#FFFFFF"
+                              fontSize="3"
+                              fontFamily="sans-serif"
+                              className="pointer-events-none select-none font-semibold shadow"
+                            >
+                              {pIdx + 1} ({pt.x}%, {pt.y}%)
+                            </text>
+                          </g>
                         ))}
                       </g>
                     );
                   })}
               </svg>
 
-              <div className="absolute bottom-3 right-3 text-[10px] font-mono text-cyan-400 bg-black/70 px-2.5 py-1 rounded border border-slate-700">
-                DRAG VERTICES TO RESHAPE NO-GO ZONE
+              <div className="absolute bottom-3 right-3 text-[11px] text-slate-300 bg-slate-900/90 px-2.5 py-1 rounded border border-slate-700 z-10">
+                Drag handles to reposition zone boundary
               </div>
             </div>
 
             {/* Zone parameters */}
             {selectedZone && (
-              <div className="mt-4 p-3 rounded-lg bg-[#0E1524] border border-slate-800 grid grid-cols-3 gap-3 text-xs font-mono">
+              <div className="mt-4 p-3 rounded-lg bg-slate-50 border border-slate-200 grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
                 <div>
-                  <span className="text-slate-500 block text-[10px]">ZONE TYPE:</span>
-                  <span className="font-bold text-slate-200">{selectedZone.type}</span>
+                  <span className="text-slate-500 block text-[11px] font-medium">ZONE TYPE:</span>
+                  <span className="font-semibold text-slate-800">{selectedZone.type}</span>
                 </div>
                 <div>
-                  <span className="text-slate-500 block text-[10px]">THREAT SCORING DELTA:</span>
-                  <span className="font-bold text-red-400">+{selectedZone.threatWeight} POINTS</span>
+                  <span className="text-slate-500 block text-[11px] font-medium">OPERATIONAL RULE:</span>
+                  <span className="font-semibold text-blue-600">
+                    {ZONE_TYPE_METRICS[selectedZone.type]?.desc || 'Perimeter evaluation'}
+                  </span>
                 </div>
                 <div>
-                  <span className="text-slate-500 block text-[10px]">POLYGON VERTICES:</span>
-                  <span className="text-cyan-400 font-bold">{selectedZone.points.length} VERTEX NODES</span>
+                  <span className="text-slate-500 block text-[11px] font-medium">POLYGON VERTICES:</span>
+                  <span className="text-slate-800 font-semibold">
+                    {selectedZone.points.length} nodes calibrated
+                  </span>
                 </div>
               </div>
             )}

@@ -8,24 +8,41 @@ export default {
   theme: {
     extend: {
       colors: {
-        tejas: {
-          bg: '#080C14',
-          surface: '#0E1524',
-          card: '#131D31',
-          border: '#1E2D48',
-          borderLight: '#2A3C5E',
-          accent: '#06B6D4',
-          emerald: '#10B981',
-          amber: '#F59E0B',
-          red: '#EF4444',
-          text: '#F1F5F9',
-          muted: '#94A3B8',
-          darkMuted: '#64748B'
-        }
+        surface: {
+          DEFAULT: '#FFFFFF',
+          subtle: '#F8FAFC',
+          muted: '#F1F5F9',
+        },
+        border: {
+          DEFAULT: '#E2E8F0',
+          subtle: '#F1F5F9',
+          strong: '#CBD5E1',
+        },
+        content: {
+          primary: '#0F172A',
+          secondary: '#334155',
+          muted: '#64748B',
+          faint: '#94A3B8',
+        },
+        brand: {
+          DEFAULT: '#2563EB',
+          hover: '#1D4ED8',
+          subtle: '#EFF6FF',
+          border: '#BFDBFE',
+        },
+        // Discrete Operational Status (Clean, calm, professional)
+        status: {
+          info: { bg: '#F8FAFC', text: '#334155', border: '#CBD5E1' },
+          notice: { bg: '#FFFBEB', text: '#92400E', border: '#FDE68A' },
+          alert: { bg: '#FFF7ED', text: '#9A3412', border: '#FED7AA' },
+          priority: { bg: '#FEF2F2', text: '#991B1B', border: '#FECACA' },
+          online: { bg: '#F0FDF4', text: '#166534', border: '#BBF7D0' },
+          offline: { bg: '#F8FAFC', text: '#64748B', border: '#E2E8F0' },
+        },
       },
       fontFamily: {
-        sans: ['Inter', 'system-ui', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'sans-serif'],
-        mono: ['JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', 'monospace'],
+        sans: ['Inter', 'system-ui', '-apple-system', 'Segoe UI', 'Roboto', 'sans-serif'],
+        mono: ['JetBrains Mono', 'ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace'],
       },
       animation: {
         'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',

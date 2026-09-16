@@ -1,183 +1,175 @@
 # TEJAS — Threat Evaluation & Joint AI Surveillance
 
 > **Tagline:** *From CCTV to Border Intelligence*  
-> **Smart India Hackathon (SIH) — Autonomous AI Surveillance & Tactical Threat Intelligence Platform**
+> **Smart India Hackathon (SIH) — Autonomous AI Surveillance & Tactical Threat Intelligence Platform**  
+> **Phase 3 Production Hardening & Operational Readiness Baseline**
 
 ---
 
 ## 1. Executive Summary
 
-**TEJAS** is an AI-driven, software-defined surveillance platform that transforms existing IP-based CCTV infrastructure into an intelligent border and perimeter surveillance network. 
+**TEJAS** is an AI-driven, software-defined surveillance and tactical intelligence platform designed for high-security border perimeters, forward operating bases, and critical infrastructure installations.
 
-Rather than functioning as an isolated collection of disconnected object detectors, TEJAS correlates observations across multiple sensor nodes into a unified **Contextual Threat Evaluation Engine** with mathematical explainability.
+Rather than functioning as isolated, disconnected object detectors that flood duty operators with noisy alerts, TEJAS grounds surveillance in a rigorous operational hierarchy:
+
+$$\mathbf{DETECTION \neq EVENT \neq ALERT \neq INCIDENT}$$
+$$\mathbf{UNKNOWN \neq HOSTILE}$$
+
+Every operational alert produced by TEJAS answers:
+- **WHAT** happened (the operational event type)
+- **WHERE** (exact camera, calibrated coordinates, and virtual zone)
+- **WHEN** (UTC epoch and timestamped chronology)
+- **WHICH** entity (local tracking ID and cross-camera global identity)
+- **WHAT** context existed (patrol status, biometric verification, night-time posture)
+- **WHAT** evidence was captured (physical crop, snapshot, metadata hash)
+- **WHY** it was surfaced (clear operational reasoning)
+
+---
+
+## 2. Core Architecture
 
 ```
-                  EXISTING CCTV INFRASTRUCTURE
-                               │
-                         RTSP / VIDEO
-                               │
-                               ▼
-                        VIDEO INGESTION
-                               │
-                               ▼
-                      AI INFERENCE ENGINE
-                               │
-            ┌──────────────────┼──────────────────┐
-            ▼                  ▼                  ▼
-          PERSON            VEHICLE              FACE
-        DETECTION          DETECTION          DETECTION
-            │                  │                  │
-            ▼                  ▼                  ▼
-         TRACKING             ANPR           RECOGNITION
-      (ByteTrack / Re-ID)      │
-            │                  ▼
-            │          PLATE RESTORATION
-            │           (Super-Res GAN)
-            │                  │
-            │                  ▼
-            │                 OCR
-            │
-            └──────────────────┬──────────────────┘
-                               ▼
-                          EVENT ENGINE
-                               │
-                               ▼
-                       EVENT CORRELATION
-                               │
-                               ▼
-                    THREAT EVALUATION ENGINE
-                        (0 - 100 Score)
-                               │
-                               ▼
-                          ALERT ENGINE
-                               │
-                     ┌─────────┴─────────┐
-                     ▼                   ▼
-             FASTAPI REST API       WebSockets
-                     │                   │
-                     └─────────┬─────────┘
-                               ▼
-                   TEJAS TACTICAL COMMAND UI
+                       CCTV / RTSP / HARDWARE INGESTION
+                                      │
+                                      ▼
+                        CAMERA MANAGER (Multi-Pipeline)
+                         ├── Dynamic Stream Probing (OpenCV)
+                         ├── Independent Thread Isolation
+                         └── Per-Camera Lifecycle & Auto-Reconnect
+                                      │
+               ┌──────────────────────┼──────────────────────┐
+               ▼                      ▼                      ▼
+        YOLOv8 + ByteTrack       YuNet + SFace          Classical ANPR
+      (People, Vehicles, Bags) (Biometric Quality Gate) (CLAHE / Lanczos Sinc)
+               │                      │                      │
+               └──────────────────────┼──────────────────────┘
+                                      ▼
+                               EVENT ENGINE
+                         ├── Spatial State Machine (ZONE_ENTRY / LOITERING / ZONE_EXIT)
+                         ├── Cross-Camera Topology Corridors (min/max transit bounds)
+                         └── Multi-Camera Isolation
+                                      │
+                                      ▼
+                         OPERATIONAL ALERT ENGINE
+                    (INFO  │  NOTICE  │  ALERT  │  PRIORITY)
+                                      │
+                                      ▼
+                        INCIDENT & EVIDENCE ENGINE
+                         ├── Physical Crop & Snapshot Storage
+                         └── Operator Triage & Dispatch Audit Trail
+                                      │
+                        ┌─────────────┴─────────────┐
+                        ▼                           ▼
+                 REST API (FastAPI)         WebSockets (/ws/events)
+                        │                           │
+                        └─────────────┬─────────────┘
+                                      ▼
+                         TEJAS TACTICAL COMMAND UI
+                      (React / Vite / Tailwind CSS / Leaflet)
 ```
 
 ---
 
-## 2. Core Innovation: The Threat Evaluation Engine
+## 3. Operational Alert Hierarchy (No Threat Scores)
 
-Traditional surveillance systems flood security operators with false positives by alerting on every isolated detection. TEJAS solves this by **correlating multi-camera events into incidents** and generating a unified, explainable threat score from **0 to 100**:
+TEJAS strictly rejects arbitrary, uncalibrated numerical threat scores (e.g. `0–100` scores or arbitrary deductions like `-30`). All decisions are evaluated according to 4 discrete operational alert levels:
 
-```
-Person detected on Outer Berm
-        ↓
-Cross-Camera Handoff confirmed
-        ↓
-Night-Time Curfew Movement (+15)
-        ↓
-Loitering Detected near Depot (+15)
-        ↓
-Kinematic Vector toward Sensitive Bunker (+20)
-        ↓
-Virtual Polygon Fence Intrusion (+30)
-        ↓
-Unknown Identity (+2)
-        ↓
---------------------------------------------------
-THREAT EVALUATION: 82 / 100  [HIGH RISK / CRITICAL]
-        ↓
-REAL-TIME OPERATOR DISPATCH ALERT
-```
-
-### Threat Scoring Weights (Configurable)
-| Factor | Default Delta | Category | Description |
+| Level | Operational Meaning | System Action | Examples |
 |---|---|---|---|
-| **Restricted-Zone Intrusion** | `+30` | Spatial | Crossing virtual polygonal fence lines |
-| **Movement Toward Sensitive Zone** | `+20` | Kinematic | Trajectory vector points continuously toward sensitive depot |
-| **Watchlist Vehicle Detected** | `+40` | Intelligence | ANPR match against high-priority law enforcement database |
-| **Night-Time Movement** | `+15` | Temporal | Movement logged during designated blackout hours (21:00 - 05:00) |
-| **Loitering Detection** | `+15` | Behavioral | Stationary dwell time exceeding threshold (120s) without transit |
-| **Unknown / Unverified Identity** | `+10` | Identity | Biometric signature not verified against authorized registry |
-| **Authorized Personnel Verification** | `-30` | Override | Valid friendly RFID / facial credential override |
-
-> **Ethical Note:** Threat scores quantify situational event risk and operational priority, not subjective human intent.
+| **INFO** | Normal logged activity; expected or authorized events | Logged to timeline; zero operator disturbance | Authorized staff patrol, clear license plate, routine vehicle transit |
+| **NOTICE** | Tactical advisory; infrastructure or notable conditions | Surface in advisory feed; no siren/pop-up | Camera offline/online, unknown face with low quality, minor transit delay |
+| **ALERT** | Operational awareness required; actionable perimeter event | Surface on dashboard with alert modal and audio cue | Unknown person entering restricted polygon zone, prolonged loitering |
+| **PRIORITY** | Immediate threat response required; critical breach or match | High-priority modal, dispatch prompt, persistent incident banner | Watchlist person match, watchlist plate match, border fence breach |
 
 ---
 
-## 3. Technology Stack
+## 4. Key Subsystems
 
-- **Frontend:** React 18, Vite, Tailwind CSS, Lucide React, Recharts, Leaflet
-- **Backend:** Python 3.11+, FastAPI, Pydantic v2, SQLAlchemy, WebSockets, JWT Authentication
-- **Database:** PostgreSQL (with automatic zero-config SQLite fallback for local developer setups)
-- **Computer Vision & Tracking:** YOLOv8, ByteTrack, OpenCV, NumPy, Pillow
-- **ANPR Super-Resolution:** Neural deblurring filter, 4x bicubic super-resolution, CLAHE contrast enhancement, PaddleOCR
-- **Orchestration:** Docker, Docker Compose
+### A. Cross-Camera Re-ID & Topology Engine (`reid_service.py`)
+- **Corridor Constraints**: Pairwise camera corridors enforce minimum transit times (preventing impossible teleportation) and maximum transit windows (preventing stale track association).
+- **Appearance Embeddings**: Color-spatial histogram and deep feature vectors matched via cosine similarity with distinct probabilistic tiers:
+  - $\ge 0.72$: Definite Identity Match (`MATCH`)
+  - $0.55 - 0.72$: Probabilistic Uncertainty (`UNCERTAIN`)
+  - $< 0.55$: Separate Global Entity (`NO_MATCH`)
+- **Strict Mode**: Unconfigured transitions between unconnected cameras are strictly rejected in high-security posture.
+
+### B. Biometric Face Recognition (`face_service.py`)
+- **Detector**: OpenCV YuNet lightweight ONNX face detector.
+- **Embedder**: OpenCV SFace 128-dimensional biometric embedding model.
+- **Quality Gate**: Minimum crop size, brightness/contrast normalization, and Laplacian variance blur rejection. Degraded crops evaluate neutrally as `UNVERIFIED` rather than triggering false alerts.
+
+### C. Classical Optical ANPR (`anpr_service.py`)
+- **Real Optical Enhancement**: Lanczos sinc interpolation, Adaptive Contrast-Limited Histogram Equalization (CLAHE), bilateral denoising, and unsharp masking. Zero neural hallucination.
+- **Syntax Normalization**: Resolves optical ambiguities (e.g., `'O'` vs `'0'`) based on standard Indian MoRTH registration plate grammar (`[STATE 2A][DISTRICT 2D][SERIES 2A][NUMBER 4D]`).
+- **Watchlist Matching**: Direct indexed query against flagged database vehicles.
+
+### D. Polygonal Zone Spatial State Machine (`event_engine.py`)
+- Scaled normalized polygon contours ($0.0 - 100.0\%$).
+- Single one-shot `ZONE_ENTRY` on penetration.
+- Single one-shot `LOITERING` incident emitted when dwell time exceeds configurable threshold.
+- Single one-shot `ZONE_EXIT` upon clearing boundary.
+- Full multi-person and multi-camera thread-safe isolation.
 
 ---
 
-## 4. Key Features & Interfaces
+## 5. Security & Authentication (RBAC)
 
-| Route | Interface | Description |
+TEJAS implements real bcrypt password hashing and HS256 JWT access tokens with three operational roles:
+
+| Role | Permissions | Default Credentials |
 |---|---|---|
-| `/dashboard` | **Tactical Command Center** | 4-grid CCTV centerpiece with live bounding boxes, real-time explainable Threat HUD, live alert stream, event timeline, and perimeter map. |
-| `/anpr` | **ANPR & Super-Resolution** | Interactive testbench comparing raw degraded license plates vs AI-enhanced plates with verifiable OCR confidence gains. |
-| `/tracking` | **Multi-Camera Tracking** | Cross-camera entity re-identification displaying sequential transit handoffs (`BOP-03` → `BORDER-RD-12` → `BOP-04` → `RESTRICTED-Z01`). |
-| `/zones` | **Virtual Fence Manager** | Interactive polygonal boundary editor with custom threat weights and camera associations. |
-| `/incidents` | **Incident Investigation** | Correlated dossiers with visual evidence snapshots, audit trails, and operator workflow actions (*Acknowledge, Investigate, Resolve, Escalate*). |
-| `/analytics` | **Surveillance Analytics** | Diurnal risk graphs, peak night activity windows, and perimeter hotspot rankings powered by Recharts. |
-| `/cameras` | **Camera Ingestion Hub** | RTSP stream registration, latency ping tests, and telemetry monitoring. |
-| `/watchlist` | **Security Watchlist** | Registry of high-priority vehicles and suspects with automated ANPR matching. |
-| `/settings` | **Threat Engine Calibration** | Dynamic sliders to reweight threat factors with instant real-time simulation updates. |
+| **ADMIN** | Full system control: Add/Delete cameras, user management, calibrate zones, adjust thresholds | `admin` / `tejas_admin_2026` |
+| **OPERATOR** | Incident triage, live stream viewing, patrol verification, acknowledgement | `operator.rawat` / `tejas_op_2026` |
+| **VIEWER** | Read-only observation of dashboard and live feeds; settings & control disabled | `viewer` / `tejas_viewer_2026` |
 
 ---
 
-## 5. Running the Application Locally
+## 6. Quickstart Guide
 
 ### Prerequisites
-- Node.js LTS (v20+ or v24)
-- Python 3.11+
+- Python 3.10+ (Recommended: Python 3.11 / 3.12 / 3.13)
+- Node.js 18+ and npm
+- Optional: RTSP IP Camera or USB Webcam (Index `0`)
 
-### Step 1: Start the Frontend (Vite)
+### Backend Setup
+```bash
+cd backend
+python -m venv .venv
+# Windows:
+.venv\Scripts\activate
+# Linux/macOS:
+source .venv/bin/activate
+
+pip install -r requirements.txt
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+```
+Backend Swagger API Docs: `http://localhost:8000/docs`
+
+### Frontend Setup
 ```bash
 cd frontend
 npm install
 npm run dev
 ```
-*Frontend will be running live at:* **`http://localhost:5173`**
+Frontend Tactical Dashboard: `http://localhost:5173`
 
-### Step 2: Start the Backend (FastAPI)
+### Docker Deployment
 ```bash
-cd backend
-python -m venv .venv
-# On Windows:
-.venv\Scripts\pip install -r requirements.txt
-.venv\Scripts\python run.py
-
-# On Linux/macOS:
-source .venv/bin/activate
-pip install -r requirements.txt
-python run.py
-```
-*Backend API and Swagger Docs will be available at:* **`http://localhost:8000/docs`**
-
----
-
-## 6. Docker Deployment
-
-Deploy the entire stack (PostgreSQL + FastAPI + Vite) in one command:
-```bash
-docker-compose up --build
+docker-compose up -d --build
 ```
 
 ---
 
-## 7. SIH 2-Minute Demonstration Script
+## 7. Verification & Regression Testing
 
-1. **Dashboard Overview:** Open `http://localhost:5173`. Point out the 4-grid live CCTV centerpiece with simulated bounding boxes, tracking vectors, and the operational HUD (`ALL SYSTEMS OPERATIONAL`).
-2. **Observe Threat Escalation:** Watch as the simulated scenario progresses:
-   - Person detected on `BOP-03`
-   - Transit across `BORDER-RD-12` during night hours
-   - Loitering near `BOP-04`
-   - Direct advance into `RESTRICTED-Z01` virtual fence
-   - Threat score surges to **82 / 100 (HIGH RISK)** with real-time mathematical factor explainability.
-3. **ANPR & Super-Resolution (`/anpr`):** Switch between degraded raw ingest vs AI-restored plate. Show the verifiable OCR confidence jump from **32% to 94%**, triggering the critical watchlist alert for plate `MP09AB1234`.
-4. **Multi-Camera Re-ID (`/tracking`):** Show the continuous sequential timeline of Person #27 transitioning between 4 non-overlapping CCTV camera nodes.
-5. **Incident Action (`/incidents`):** Click the critical alert, open the incident dossier, review the chain of evidence, and demonstrate operator workflow (*Investigate* / *Mark Resolved*).
+Run the end-to-end regression test suite to validate all 28 Phase 3 checkpoints:
+```bash
+python scratch/test_full_system_regression.py
+```
+All tests validate:
+- Zero numerical threat scores across decision trees
+- Strict operational alert gating
+- Real camera topology transit validation
+- Face biometric quality rejection
+- ANPR plate normalization and optical enhancement
+- Token issuance and password security
