@@ -18,24 +18,41 @@ router = APIRouter(prefix="/cameras", tags=["Cameras"])
 
 
 class ProbeRequest(BaseModel):
-    stream_url: str
+    stream_url: Optional[str] = None
+    source_url: Optional[str] = None
     stream_type: str = "RTSP"  # WEBCAM, RTSP, DEMO_MP4, MP4
+
+    @property
+    def resolved_url(self) -> str:
+        return self.stream_url or self.source_url or ""
 
 
 def probe_video_source(source_str: str, source_type: str = "RTSP") -> Dict[str, Any]:
     """Tests actual camera connection using OpenCV VideoCapture with failure isolation."""
     import os
     start = time.time()
+    source_str = (source_str or "").strip()
     parsed_source: Any = source_str
     st = (source_type or "").upper()
 
-    if st in ("WEBCAM", "LOCAL_CAM", "0", "1") or str(source_str).isdigit():
+    if not source_str:
+        return {
+            "status": "EMPTY_SOURCE",
+            "connected": False,
+            "reachable": False,
+            "latency_ms": 0.0,
+            "fps": 0.0,
+            "resolution": "--",
+            "message": "Stream URL / device index cannot be empty."
+        }
+
+    if st in ("WEBCAM", "LOCAL_CAM", "HARDWARE", "0", "1") or str(source_str).isdigit():
         try:
             parsed_source = int(source_str) if str(source_str).isdigit() else 0
         except Exception:
             parsed_source = 0
     else:
-        # For network streams, set low 2.5s socket timeout
+        # For network streams, set 2.5s socket timeout
         os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp|stimeout;2500000"
 
     try:
@@ -45,10 +62,11 @@ def probe_video_source(source_str: str, source_type: str = "RTSP") -> Dict[str, 
             return {
                 "status": "UNREACHABLE",
                 "connected": False,
+                "reachable": False,
                 "latency_ms": latency,
                 "fps": 0.0,
                 "resolution": "--",
-                "message": f"Could not connect to {source_type} stream at '{source_str}'."
+                "message": f"Could not connect to {source_type} stream at '{source_str}'. Verify device is online and accessible."
             }
 
         ret, frame = cap.read()
@@ -62,15 +80,17 @@ def probe_video_source(source_str: str, source_type: str = "RTSP") -> Dict[str, 
             return {
                 "status": "FRAME_ERROR",
                 "connected": False,
+                "reachable": False,
                 "latency_ms": latency,
                 "fps": 0.0,
                 "resolution": "--",
-                "message": "Stream connected but failed to return a valid frame."
+                "message": "Stream connected but failed to return a valid video frame."
             }
 
         return {
             "status": "CONNECTED",
             "connected": True,
+            "reachable": True,
             "latency_ms": latency,
             "fps": round(fps, 1),
             "resolution": f"{w}x{h}",
@@ -82,6 +102,7 @@ def probe_video_source(source_str: str, source_type: str = "RTSP") -> Dict[str, 
         return {
             "status": "PROBE_EXCEPTION",
             "connected": False,
+            "reachable": False,
             "latency_ms": latency,
             "fps": 0.0,
             "resolution": "--",
@@ -199,9 +220,16 @@ def get_camera(camera_id: str, db: Session = Depends(get_db)):
 
 @router.post("", response_model=CameraResponse)
 def create_camera(payload: CameraCreate, db: Session = Depends(get_db)):
-    # Sequential ID generation
-    count = db.query(Camera).count()
-    cam_id = f"CAM-{count + 1:02d}"
+    # Collision-safe ID generation: find max existing numeric ID
+    existing_ids = [c.id for c in db.query(Camera.id).all()]
+    max_num = 0
+    for cid in existing_ids:
+        try:
+            num = int(cid.replace("CAM-", ""))
+            max_num = max(max_num, num)
+        except (ValueError, AttributeError):
+            pass
+    cam_id = f"CAM-{max_num + 1:02d}"
     db_cam = Camera(id=cam_id, **payload.model_dump())
     db.add(db_cam)
     db.commit()
@@ -259,7 +287,7 @@ def delete_camera(camera_id: str, db: Session = Depends(get_db)):
 @router.post("/probe")
 def probe_arbitrary_stream(payload: ProbeRequest):
     """Tests connectivity to any stream source before creating camera."""
-    return probe_video_source(payload.stream_url, payload.stream_type)
+    return probe_video_source(payload.resolved_url, payload.stream_type)
 
 
 @router.post("/{camera_id}/test")

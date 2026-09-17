@@ -5,13 +5,15 @@ Backward compatible: defaults to CAM-00 when no camera_id is specified.
 """
 from typing import Optional, Any, Dict, List
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Depends
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
 
 from app.services.camera_manager import camera_manager
 from app.services.video_source import VideoSource
 from app.config import settings
+from app.database import get_db
 
 router = APIRouter(prefix="/video", tags=["Video Pipeline & Live Streams"])
 
@@ -38,13 +40,37 @@ class CameraStartRequest(BaseModel):
 
 # ── MJPEG Stream ──────────────────────────────
 @router.get("/feed")
-def get_live_video_feed(camera_id: str = Query(default="CAM-00")):
+def get_live_video_feed(camera_id: str = Query(default="CAM-00"), db: Session = Depends(get_db)):
     """Real-time annotated MJPEG stream from a camera pipeline."""
     p = camera_manager.get_pipeline(camera_id)
     if p is None:
-        # Auto-start primary camera with configured source
-        src = settings.get_resolved_video_source()
-        camera_manager.start_camera(camera_id, src)
+        # Look up this camera in DB to get its actual stream source
+        from app.models.models import Camera
+        cam = db.query(Camera).filter(
+            (Camera.id == camera_id) | (Camera.code == camera_id)
+        ).first()
+
+        if cam is None:
+            # Unknown camera — only fall back to webcam for CAM-00
+            if camera_id == "CAM-00":
+                src = settings.get_resolved_video_source()
+                camera_manager.start_camera(camera_id, src)
+            else:
+                raise HTTPException(status_code=404, detail=f"Camera '{camera_id}' not found in database")
+        else:
+            # Use the camera's configured stream source
+            stream_type = (cam.stream_type or "").upper()
+            if stream_type in ("WEBCAM", "HARDWARE") or not cam.stream_url:
+                src = int(cam.stream_url) if (cam.stream_url or "").isdigit() else 0
+            else:
+                src = cam.stream_url  # RTSP / MP4 / etc.
+            camera_manager.start_camera(cam.id, src)
+            # Also register by code so both keys work
+            if cam.code and cam.code != cam.id:
+                p2 = camera_manager.get_pipeline(cam.id)
+                if p2:
+                    camera_manager._pipelines[cam.code] = p2
+
         p = camera_manager.get_pipeline(camera_id)
 
     if p is None:

@@ -57,9 +57,20 @@ export const apiClient = {
       const res = await fetch(`${BASE_URL}/cameras/probe`, {
         method: 'POST',
         headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
-        body: JSON.stringify({ source_url: sourceUrl, stream_type: streamType })
+        body: JSON.stringify({ 
+          stream_url: sourceUrl, 
+          source_url: sourceUrl, 
+          stream_type: streamType 
+        })
       });
-      return await res.json();
+      const data = await res.json();
+      return {
+        ...data,
+        reachable: data.reachable !== undefined ? data.reachable : (data.connected === true || data.status === 'CONNECTED'),
+        fps: data.fps || 0,
+        resolution: data.resolution || '--',
+        error: data.message || data.error || (data.connected === false ? 'Connection failed' : null)
+      };
     } catch (e) {
       return { reachable: false, error: e.message || "Network unreachable" };
     }
@@ -128,6 +139,21 @@ export const apiClient = {
     });
     if (!res.ok) throw new Error("Failed to restart camera");
     return await res.json();
+  },
+
+  async testCamera(cameraId) {
+    const res = await fetch(`${BASE_URL}/cameras/${cameraId}/test`, {
+      method: 'POST',
+      headers: getAuthHeaders()
+    });
+    const data = await res.json();
+    return {
+      ...data,
+      reachable: data.reachable !== undefined ? data.reachable : (data.connected === true || data.status === 'CONNECTED'),
+      fps: data.fps || 0,
+      resolution: data.resolution || '--',
+      error: data.message || data.error || (data.connected === false ? 'Connection failed' : null)
+    };
   },
 
   // ── Zones Endpoints ─────────────────────────────────────

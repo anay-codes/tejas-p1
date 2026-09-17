@@ -497,13 +497,53 @@ class CameraPipeline:
                 "zone_count": len(self.zones),
             }
 
+    def _create_standby_frame(self, message: str = "CONNECTING TO STREAM") -> bytes:
+        img = np.zeros((480, 640, 3), dtype=np.uint8)
+        # Tactical border
+        cv2.rectangle(img, (12, 12), (628, 468), (45, 45, 45), 1)
+        cv2.rectangle(img, (16, 16), (624, 464), (30, 30, 30), 1)
+        # Tactical crosshairs
+        cv2.line(img, (320, 20), (320, 40), (60, 60, 60), 1)
+        cv2.line(img, (320, 440), (320, 460), (60, 60, 60), 1)
+        cv2.line(img, (20, 240), (40, 240), (60, 60, 60), 1)
+        cv2.line(img, (600, 240), (620, 240), (60, 60, 60), 1)
+        
+        # Header Info
+        cv2.putText(img, f"TEJAS NODE: {self.camera_id}", (30, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 210, 255), 2)
+        cv2.putText(img, f"SOURCE: {str(self.source)[:45]}", (30, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (170, 170, 170), 1)
+        
+        # Status Box
+        is_connecting = "CONNECTING" in message
+        status_color = (0, 180, 255) if is_connecting else (0, 70, 255)
+        cv2.putText(img, f"[ {message} ]", (70, 225), cv2.FONT_HERSHEY_SIMPLEX, 0.7, status_color, 2)
+        cv2.putText(img, "Verify IP camera / phone streaming server is active", (70, 260), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (160, 160, 160), 1)
+        
+        # Timestamp
+        ts = time.strftime("%Y-%m-%d %H:%M:%S UTC")
+        cv2.putText(img, ts, (30, 445), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (100, 100, 100), 1)
+        
+        ret, buf = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 80])
+        return buf.tobytes() if ret else b""
+
     def generate_mjpeg_stream(self):
+        last_standby_time = 0.0
         while self.is_running:
             with self.lock:
                 jpeg = self.latest_jpeg
-            if jpeg:
+                connected = self.is_connected
+            now = time.time()
+            if jpeg and connected:
                 yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + jpeg + b"\r\n"
-            time.sleep(0.033)
+                time.sleep(0.033)
+            else:
+                # Send standby frame at ~2 fps so browser immediately displays status instead of spinning
+                if now - last_standby_time >= 0.5:
+                    status_msg = "CONNECTING TO STREAM" if not connected else "STREAM SYNCING"
+                    standby = self._create_standby_frame(status_msg)
+                    if standby:
+                        yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + standby + b"\r\n"
+                    last_standby_time = now
+                time.sleep(0.08)
 
 
 # ──────────────────────────────────────────────
@@ -536,15 +576,15 @@ class CameraManager:
         p.reload_zones()
         return p
 
-    def start_camera(self, camera_id: str, source: Union[int, str]) -> bool:
+    def start_camera(self, camera_id: str, source: Union[int, str]) -> CameraPipeline:
         with self._lock:
             if camera_id in self._pipelines:
                 logger.info(f"Camera {camera_id} already running")
-                return True
+                return self._pipelines[camera_id]
             p = self._make_pipeline(camera_id, source)
             p.start()
             self._pipelines[camera_id] = p
-        return True
+        return p
 
     def stop_camera(self, camera_id: str):
         with self._lock:
