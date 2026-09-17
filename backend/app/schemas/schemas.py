@@ -64,6 +64,8 @@ class ZoneCreate(BaseModel):
     threat_weight: int = 30
     points_json: List[Dict[str, Any]] = []
     rule_triggers: List[str] = []
+    fence_type: str = "2D"     # "2D" or "3D"
+    fence_depth: float = 0.0  # metres (camera-space extrusion depth, relevant for 3D)
 
 class ZoneUpdate(BaseModel):
     name: Optional[str] = None
@@ -73,6 +75,8 @@ class ZoneUpdate(BaseModel):
     threat_weight: Optional[int] = None
     points_json: Optional[List[Dict[str, Any]]] = None
     rule_triggers: Optional[List[str]] = None
+    fence_type: Optional[str] = None
+    fence_depth: Optional[float] = None
 
 class ZoneResponse(ZoneCreate):
     id: str

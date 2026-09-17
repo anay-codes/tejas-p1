@@ -19,6 +19,8 @@ export default function Zones() {
   const [isAddingZone, setIsAddingZone] = useState(false);
   const [newZoneName, setNewZoneName] = useState('');
   const [newZoneType, setNewZoneType] = useState('RESTRICTED');
+  const [newFenceType, setNewFenceType] = useState('2D');
+  const [newFenceDepth, setNewFenceDepth] = useState(2.5);
   const [isSaving, setIsSaving] = useState(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -44,7 +46,9 @@ export default function Zones() {
         points: Array.isArray(z.points_json) && z.points_json.length >= 3 
           ? z.points_json 
           : [{ x: 15, y: 25 }, { x: 85, y: 25 }, { x: 85, y: 85 }, { x: 15, y: 85 }],
-        ruleTriggers: z.rule_triggers || ["Intrusion"]
+        ruleTriggers: z.rule_triggers || ["Intrusion"],
+        fence_type: z.fence_type || '2D',
+        fence_depth: z.fence_depth || 0.0,
       }));
 
       setZones(loadedZones);
@@ -144,7 +148,9 @@ export default function Zones() {
         { x: 80, y: 80 },
         { x: 20, y: 80 }
       ],
-      rule_triggers: [`${newZoneType} Perimeter Violation`]
+      rule_triggers: [`${newZoneType} Perimeter Violation`],
+      fence_type: newFenceType,
+      fence_depth: newFenceType === '3D' ? Number(newFenceDepth) : 0.0,
     };
 
     setIsSaving(true);
@@ -343,6 +349,63 @@ export default function Zones() {
                   </div>
                 </div>
 
+                {/* Fence Type Selection */}
+                <div>
+                  <label className="block text-slate-600 font-medium mb-1.5">Fence Type</label>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setNewFenceType('2D')}
+                      className={`flex-1 py-1.5 rounded-md border text-xs font-semibold transition-colors ${
+                        newFenceType === '2D'
+                          ? 'bg-blue-600 text-white border-blue-600'
+                          : 'bg-white border-slate-300 text-slate-600 hover:bg-slate-50'
+                      }`}
+                    >
+                      2D Virtual Fence
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setNewFenceType('3D')}
+                      className={`flex-1 py-1.5 rounded-md border text-xs font-semibold transition-colors ${
+                        newFenceType === '3D'
+                          ? 'bg-indigo-600 text-white border-indigo-600'
+                          : 'bg-white border-slate-300 text-slate-600 hover:bg-slate-50'
+                      }`}
+                    >
+                      3D Fence
+                    </button>
+                  </div>
+                </div>
+
+                {/* 3D Fence depth — only shown for 3D mode */}
+                {newFenceType === '3D' && (
+                  <div className="p-3 rounded-lg bg-indigo-50 border border-indigo-200 space-y-2">
+                    <p className="text-[10px] text-indigo-700 font-medium uppercase tracking-wide">3D Fence Configuration</p>
+                    <p className="text-[10px] text-indigo-600">
+                      Ground footprint defined by the polygon below. Specify the depth
+                      (camera-space estimate — physical accuracy requires calibration).
+                    </p>
+                    <div>
+                      <label className="block text-slate-600 font-medium mb-1">Depth (m)</label>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="number"
+                          min="0.1" max="20" step="0.1"
+                          value={newFenceDepth}
+                          onChange={(e) => setNewFenceDepth(e.target.value)}
+                          className="input-clean w-28 text-xs"
+                        />
+                        <span className="text-slate-500 text-xs">m</span>
+                      </div>
+                    </div>
+                    <p className="text-[10px] text-indigo-500">
+                      The ground footprint polygon is drawn in the canvas on the right.
+                      The depth parameter is stored and used during zone evaluation.
+                    </p>
+                  </div>
+                )}
+
                 <div className="flex items-center gap-2 pt-2">
                   <button
                     type="submit"
@@ -486,10 +549,21 @@ export default function Zones() {
 
             {/* Zone parameters */}
             {selectedZone && (
-              <div className="mt-4 p-3 rounded-lg bg-slate-50 border border-slate-200 grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+              <div className="mt-4 p-3 rounded-lg bg-slate-50 border border-slate-200 grid grid-cols-1 md:grid-cols-4 gap-3 text-xs">
                 <div>
                   <span className="text-slate-500 block text-[11px] font-medium">ZONE TYPE:</span>
                   <span className="font-semibold text-slate-800">{selectedZone.type}</span>
+                </div>
+                <div>
+                  <span className="text-slate-500 block text-[11px] font-medium">FENCE TYPE:</span>
+                  <span className={`font-semibold ${
+                    selectedZone.fence_type === '3D' ? 'text-indigo-700' : 'text-slate-800'
+                  }`}>
+                    {selectedZone.fence_type || '2D'}
+                    {selectedZone.fence_type === '3D' && selectedZone.fence_depth > 0 && (
+                      <span className="ml-1 text-indigo-500">({selectedZone.fence_depth}m)</span>
+                    )}
+                  </span>
                 </div>
                 <div>
                   <span className="text-slate-500 block text-[11px] font-medium">OPERATIONAL RULE:</span>

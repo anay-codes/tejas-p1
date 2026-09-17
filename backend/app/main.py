@@ -14,15 +14,16 @@ from fastapi.middleware.cors import CORSMiddleware
 logger = logging.getLogger("tejas.core")
 
 from app.config import settings
-from app.database import engine, Base, run_sqlite_migrations
+from app.database import engine, Base, run_database_migrations
 from app.api import auth, cameras, events, incidents, alerts, anpr, zones, watchlist, threat_rules, analytics, video, tracking, face, patrol
 from app.services.camera_manager import camera_manager
 from app.services.face_service import face_service
 from app.websocket.connection_manager import manager
 
+import app.models.models
 # Create all database tables + apply non-destructive migrations
 Base.metadata.create_all(bind=engine)
-run_sqlite_migrations()
+run_database_migrations()
 
 
 def _seed_initial_data():

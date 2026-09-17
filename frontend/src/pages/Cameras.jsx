@@ -13,7 +13,10 @@ const EMPTY_FORM = {
   fps: 15,
   resolution: '1280x720',
   lat: 32.7300,
-  lng: 74.8600
+  lng: 74.8600,
+  // Fence/zone configuration
+  fence_type: '2D',
+  fence_depth: 2.5,
 };
 
 export default function Cameras() {
@@ -28,6 +31,9 @@ export default function Cameras() {
   const [editProbeResult, setEditProbeResult] = useState(null);
   const [isEditProbing, setIsEditProbing] = useState(false);
   const [savingEdit, setSavingEdit] = useState(false);
+  // Per-camera zone fence editing in the edit modal
+  const [editCamZones, setEditCamZones] = useState([]);
+  const [editZoneSaving, setEditZoneSaving] = useState(false);
   const isOperatorOrAdmin = authService.hasRole('ADMIN', 'OPERATOR');
 
   const [formData, setFormData] = useState({ ...EMPTY_FORM });
@@ -161,7 +167,7 @@ export default function Cameras() {
   };
 
   // ── Open edit modal ────────────────────────────────────────
-  const openEdit = (cam) => {
+  const openEdit = async (cam) => {
     setEditingCam(cam);
     setEditForm({
       name: cam.name || '',
@@ -176,6 +182,13 @@ export default function Cameras() {
       ai_enabled: cam.ai_enabled !== undefined ? cam.ai_enabled : true,
     });
     setEditProbeResult(null);
+    // Load zones for this camera
+    try {
+      const zones = await apiClient.getZonesByCamera(cam.code);
+      setEditCamZones(zones || []);
+    } catch (e) {
+      setEditCamZones([]);
+    }
   };
 
   const handleSaveEdit = async (e) => {
@@ -197,12 +210,32 @@ export default function Cameras() {
       await loadCameras();
       setEditingCam(null);
       setEditProbeResult(null);
+      setEditCamZones([]);
     } catch (err) {
       alert("Failed to update camera: " + (err.message || "Error"));
     } finally {
       setSavingEdit(false);
     }
   };
+
+  // ── Save zone fence settings inline in edit modal ──────────
+  const handleSaveZoneFence = async (zone) => {
+    setEditZoneSaving(true);
+    try {
+      await apiClient.updateZone(zone.id, {
+        fence_type: zone.fence_type,
+        fence_depth: zone.fence_type === '3D' ? Number(zone.fence_depth) : 0.0,
+      });
+      // Refresh zones list
+      const zones = await apiClient.getZonesByCamera(editingCam.code);
+      setEditCamZones(zones || []);
+    } catch (err) {
+      alert("Failed to update zone fence: " + (err.message || "Error"));
+    } finally {
+      setEditZoneSaving(false);
+    }
+  };
+
 
   return (
     <div className="space-y-5">
@@ -373,6 +406,62 @@ export default function Cameras() {
               </div>
             )}
 
+            {/* ── Fence / Zone Configuration ── */}
+            <div className="md:col-span-3 pt-3 border-t border-slate-100">
+              <h3 className="text-xs font-semibold text-slate-800 uppercase tracking-wide mb-2 flex items-center gap-1.5">
+                <span>🗺</span> Initial Fence / Zone Configuration
+              </h3>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+                <div className="md:col-span-2">
+                  <label className="block text-slate-600 font-medium mb-1.5">Fence Type</label>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setFormData({ ...formData, fence_type: '2D' })}
+                      className={`flex-1 py-1.5 rounded-md border text-xs font-semibold transition-colors ${
+                        formData.fence_type === '2D'
+                          ? 'bg-blue-600 text-white border-blue-600'
+                          : 'bg-white border-slate-300 text-slate-600 hover:bg-slate-50'
+                      }`}
+                    >
+                      2D Virtual Fence
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setFormData({ ...formData, fence_type: '3D' })}
+                      className={`flex-1 py-1.5 rounded-md border text-xs font-semibold transition-colors ${
+                        formData.fence_type === '3D'
+                          ? 'bg-indigo-600 text-white border-indigo-600'
+                          : 'bg-white border-slate-300 text-slate-600 hover:bg-slate-50'
+                      }`}
+                    >
+                      3D Fence
+                    </button>
+                  </div>
+                </div>
+                {formData.fence_type === '3D' && (
+                  <div>
+                    <label className="block text-slate-600 font-medium mb-1">Depth (m)</label>
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        type="number" min="0.1" max="20" step="0.1"
+                        value={formData.fence_depth}
+                        onChange={(e) => setFormData({ ...formData, fence_depth: e.target.value })}
+                        className="input-clean w-20 text-xs"
+                      />
+                      <span className="text-slate-400 text-xs">m</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+              {formData.fence_type === '3D' && (
+                <p className="mt-2 text-[10px] text-indigo-600 bg-indigo-50 border border-indigo-100 rounded px-2 py-1">
+                  After saving, go to <strong>Zones</strong> to draw the ground footprint polygon for this camera.
+                  The depth you set here will be stored with the zone.
+                </p>
+              )}
+            </div>
+
             <div className="md:col-span-3 flex items-center gap-2 pt-2 border-t border-slate-100">
               <button
                 type="submit"
@@ -540,6 +629,100 @@ export default function Cameras() {
                 </label>
               </div>
 
+              {/* ── Live Feed Preview ── */}
+              <div className="md:col-span-2 rounded-lg overflow-hidden border border-slate-200 bg-slate-900 aspect-video relative flex items-center justify-center">
+                <span className="text-slate-500 text-xs z-0 pointer-events-none">Stream offline or loading...</span>
+                <img
+                  src={`http://localhost:8000/api/video/feed?camera_id=${encodeURIComponent(editingCam.code)}`}
+                  alt="Live Camera Feed"
+                  className="absolute inset-0 w-full h-full object-cover z-10"
+                  onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                />
+              </div>
+
+              {/* ── Fence / Zone Configuration in Edit ── */}
+              <div className="md:col-span-2 pt-3 border-t border-slate-100 space-y-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wide">
+                    🗺 Fence / Zone Configuration
+                  </h3>
+                  <Link
+                    to="/zones"
+                    className="text-[11px] text-blue-600 hover:text-blue-700 font-medium"
+                    onClick={() => setEditingCam(null)}
+                  >
+                    Edit Polygon Boundaries →
+                  </Link>
+                </div>
+
+                {editCamZones.length === 0 ? (
+                  <p className="text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded p-2">
+                    No zones configured for this camera. <Link to="/zones" className="text-blue-600" onClick={() => setEditingCam(null)}>Add a zone →</Link>
+                  </p>
+                ) : (
+                  <div className="space-y-2">
+                    {editCamZones.map((zone) => (
+                      <div key={zone.id} className="p-3 rounded-lg bg-slate-50 border border-slate-200 text-xs space-y-2">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <span className="font-semibold text-slate-900">{zone.name}</span>
+                            <span className="ml-2 text-slate-500 text-[10px]">{zone.type}</span>
+                          </div>
+                          <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${
+                            zone.fence_type === '3D' ? 'bg-indigo-50 text-indigo-700 border-indigo-200' : 'bg-blue-50 text-blue-700 border-blue-200'
+                          }`}>{zone.fence_type || '2D'}</span>
+                        </div>
+
+                        <div className="flex items-center gap-3">
+                          <div>
+                            <label className="block text-slate-500 font-medium mb-1 text-[10px]">Fence Type</label>
+                            <div className="flex gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => setEditCamZones(prev => prev.map(z => z.id === zone.id ? { ...z, fence_type: '2D' } : z))}
+                                className={`px-2 py-0.5 rounded border text-[10px] font-semibold transition-colors ${
+                                  zone.fence_type === '2D' || !zone.fence_type ? 'bg-blue-600 text-white border-blue-600' : 'bg-white border-slate-300 text-slate-600'
+                                }`}
+                              >2D</button>
+                              <button
+                                type="button"
+                                onClick={() => setEditCamZones(prev => prev.map(z => z.id === zone.id ? { ...z, fence_type: '3D', fence_depth: z.fence_depth || 2.5 } : z))}
+                                className={`px-2 py-0.5 rounded border text-[10px] font-semibold transition-colors ${
+                                  zone.fence_type === '3D' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white border-slate-300 text-slate-600'
+                                }`}
+                              >3D</button>
+                            </div>
+                          </div>
+
+                          {zone.fence_type === '3D' && (
+                            <div>
+                              <label className="block text-slate-500 font-medium mb-1 text-[10px]">Depth (m)</label>
+                              <input
+                                type="number" min="0.1" max="20" step="0.1"
+                                value={zone.fence_depth || 2.5}
+                                onChange={(e) => setEditCamZones(prev => prev.map(z => z.id === zone.id ? { ...z, fence_depth: e.target.value } : z))}
+                                className="input-clean w-16 text-xs"
+                              />
+                            </div>
+                          )}
+
+                          <div className="ml-auto">
+                            <button
+                              type="button"
+                              disabled={editZoneSaving}
+                              onClick={() => handleSaveZoneFence(zone)}
+                              className="px-2.5 py-1 rounded bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-semibold disabled:opacity-50"
+                            >
+                              {editZoneSaving ? '...' : 'Save'}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
               <div className="md:col-span-2 flex items-center gap-2 pt-2 border-t border-slate-100">
                 <button
                   type="submit"
@@ -550,7 +733,7 @@ export default function Cameras() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => { setEditingCam(null); setEditProbeResult(null); }}
+                  onClick={() => { setEditingCam(null); setEditProbeResult(null); setEditCamZones([]); }}
                   className="px-4 py-2 rounded-md bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 text-xs font-medium transition-colors"
                 >
                   Cancel

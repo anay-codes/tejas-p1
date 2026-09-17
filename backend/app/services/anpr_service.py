@@ -74,7 +74,8 @@ class ANPRService:
     """
 
     def __init__(self):
-        self.reader = get_ocr_reader()
+        # Removed eager easyocr initialization to prevent blocking startup
+        pass
 
     # -------------------------------------------------------------------------
     # 1. NUMBER PLATE DETECTION & CROPPING

@@ -1,79 +1,52 @@
-// TEJAS Authentication & RBAC Service
+// TEJAS Authentication compatibility shim.
+// Auth is temporarily disabled; keep this API so existing UI code stays stable.
 
-const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
 const TOKEN_KEY = 'tejas_auth_token';
 const USER_KEY = 'tejas_auth_user';
 
+const OPEN_USER = {
+  username: 'open-operator',
+  role: 'ADMIN',
+  full_name: 'Duty Operator'
+};
+
 export const authService = {
   getToken() {
-    return localStorage.getItem(TOKEN_KEY) || sessionStorage.getItem(TOKEN_KEY);
+    return null;
   },
 
   getUser() {
     const raw = localStorage.getItem(USER_KEY) || sessionStorage.getItem(USER_KEY);
-    if (!raw) return null;
+    if (!raw) return OPEN_USER;
     try {
-      return JSON.parse(raw);
+      return { ...OPEN_USER, ...JSON.parse(raw) };
     } catch {
-      return null;
+      return OPEN_USER;
     }
   },
 
   isAuthenticated() {
-    const token = this.getToken();
-    return Boolean(token);
+    return true;
   },
 
   getRole() {
     const user = this.getUser();
-    return (user?.role || 'VIEWER').toUpperCase();
+    return (user?.role || OPEN_USER.role).toUpperCase();
   },
 
   hasRole(...allowedRoles) {
+    if (!allowedRoles.length) return true;
     const userRole = this.getRole();
     const upperAllowed = allowedRoles.map(r => r.toUpperCase());
     return upperAllowed.includes(userRole);
   },
 
-  async login(username, password) {
-    const res = await fetch(`${BASE_URL}/auth/login-json`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password })
-    });
-
-    if (!res.ok) {
-      let msg = 'Authentication failed';
-      try {
-        const err = await res.json();
-        msg = err.detail || msg;
-      } catch (_) {}
-      throw new Error(msg);
-    }
-
-    const data = await res.json();
-    const token = data.access_token;
-    localStorage.setItem(TOKEN_KEY, token);
-
-    let userProfile = {
-      username: data.username || username,
-      role: data.role || 'OPERATOR',
-      full_name: data.username || username
+  async login(username) {
+    const userProfile = {
+      ...OPEN_USER,
+      username: username || OPEN_USER.username,
+      full_name: username || OPEN_USER.full_name
     };
-
-    // Attempt profile retrieval
-    try {
-      const meRes = await fetch(`${BASE_URL}/auth/me`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      if (meRes.ok) {
-        const me = await meRes.json();
-        userProfile = { ...userProfile, ...me };
-      }
-    } catch (e) {
-      console.warn("Could not fetch user profile details:", e);
-    }
-
     localStorage.setItem(USER_KEY, JSON.stringify(userProfile));
     window.dispatchEvent(new Event('tejas_auth_changed'));
     return userProfile;

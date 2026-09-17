@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Shield, Bell, User, Clock, LogOut } from 'lucide-react';
-import { useNavigate, Link } from 'react-router-dom';
+import { Shield, Bell, User, Clock } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { authService } from '../../services/auth';
 
 export default function Navbar({ 
@@ -8,7 +8,6 @@ export default function Navbar({
   activeIncidentsCount = 0, 
   severity = 'INFO'
 }) {
-  const navigate = useNavigate();
   const [timeStr, setTimeStr] = useState('');
   const [currentUser, setCurrentUser] = useState(authService.getUser());
 
@@ -30,11 +29,6 @@ export default function Navbar({
       window.removeEventListener('tejas_auth_changed', handleAuthChange);
     };
   }, []);
-
-  const handleLogout = () => {
-    authService.logout();
-    navigate('/login');
-  };
 
   const getSeverityBadge = (sev) => {
     const norm = (sev || '').toUpperCase();
@@ -113,7 +107,7 @@ export default function Navbar({
           )}
         </Link>
 
-        {/* User Identity & Logout */}
+        {/* User Identity */}
         <div className="flex items-center gap-2 pl-3 border-l border-slate-200">
           <div className="w-7 h-7 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-600 text-xs font-medium">
             <User className="w-3.5 h-3.5" />
@@ -122,14 +116,6 @@ export default function Navbar({
             <div className="font-semibold text-slate-800">{displayName}</div>
             <div className="text-[10px] text-slate-500">{roleName}</div>
           </div>
-
-          <button
-            onClick={handleLogout}
-            title="Sign out of session"
-            className="p-1.5 ml-1 rounded-md text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors"
-          >
-            <LogOut className="w-4 h-4" />
-          </button>
         </div>
       </div>
     </header>

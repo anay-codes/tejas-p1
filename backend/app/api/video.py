@@ -171,8 +171,13 @@ def start_camera_pipeline(payload: CameraStartRequest):
     src = payload.source
     if isinstance(src, str) and src.isdigit():
         src = int(src)
-    ok = camera_manager.start_camera(payload.camera_id, src)
-    return {"message": f"Camera {payload.camera_id} started", "success": ok}
+    pipeline = camera_manager.start_camera(payload.camera_id, src)
+    return {
+        "message": f"Camera {payload.camera_id} started",
+        "success": bool(pipeline and pipeline.is_running),
+        "camera_id": payload.camera_id,
+        "source": str(src),
+    }
 
 
 @router.post("/stop")

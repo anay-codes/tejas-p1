@@ -1,8 +1,11 @@
-from sqlalchemy import create_engine
+import logging
+
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import declarative_base, sessionmaker
 from app.config import settings
 
 is_sqlite = settings.DATABASE_URL.startswith("sqlite")
+logger = logging.getLogger("tejas.database")
 
 connect_args = {"check_same_thread": False} if is_sqlite else {}
 
@@ -23,61 +26,91 @@ def get_db():
         db.close()
 
 
-def run_sqlite_migrations():
-    """Applies non-destructive schema migrations for existing SQLite databases."""
-    if not is_sqlite:
-        return
-    import sqlite3
-    db_path = settings.DATABASE_URL.replace("sqlite:///", "")
+def _json_default_sql() -> str:
+    if engine.dialect.name == "postgresql":
+        return "JSON DEFAULT '{}'::json"
+    return "JSON DEFAULT '{}'"
+
+
+def _datetime_sql() -> str:
+    if engine.dialect.name == "postgresql":
+        return "TIMESTAMP"
+    return "DATETIME"
+
+
+def _table_columns(conn, table_name: str) -> set[str]:
     try:
-        conn = sqlite3.connect(db_path)
-        cursor = conn.cursor()
+        if engine.dialect.name == "postgresql":
+            rows = conn.execute(
+                text(
+                    """
+                    SELECT column_name
+                    FROM information_schema.columns
+                    WHERE table_schema = current_schema()
+                      AND table_name = :table_name
+                    """
+                ),
+                {"table_name": table_name},
+            ).fetchall()
+            return {row[0] for row in rows}
 
-        # Check and add columns to incidents table if missing
-        cursor.execute("PRAGMA table_info(incidents)")
-        inc_cols = [row[1] for row in cursor.fetchall()]
-        if inc_cols:
-            if "resolution_notes" not in inc_cols:
-                cursor.execute("ALTER TABLE incidents ADD COLUMN resolution_notes TEXT")
-            if "anpr_data" not in inc_cols:
-                cursor.execute("ALTER TABLE incidents ADD COLUMN anpr_data JSON DEFAULT '{}'")
-            if "affected_track_id" not in inc_cols:
-                cursor.execute("ALTER TABLE incidents ADD COLUMN affected_track_id VARCHAR(50)")
-            if "updated_at" not in inc_cols:
-                cursor.execute("ALTER TABLE incidents ADD COLUMN updated_at DATETIME")
+        if engine.dialect.name == "sqlite":
+            rows = conn.execute(text(f"PRAGMA table_info({table_name})")).fetchall()
+            return {row[1] for row in rows}
 
-        # Check and add columns to audit_logs table if missing
-        cursor.execute("PRAGMA table_info(audit_logs)")
-        audit_cols = [row[1] for row in cursor.fetchall()]
-        if audit_cols:
-            if "details" not in audit_cols:
-                cursor.execute("ALTER TABLE audit_logs ADD COLUMN details JSON DEFAULT '{}'")
-            if "created_at" not in audit_cols:
-                cursor.execute("ALTER TABLE audit_logs ADD COLUMN created_at DATETIME")
-
-        # Check and add columns to events table if missing
-        cursor.execute("PRAGMA table_info(events)")
-        evt_cols = [row[1] for row in cursor.fetchall()]
-        if evt_cols:
-            if "incident_id" not in evt_cols:
-                cursor.execute("ALTER TABLE events ADD COLUMN incident_id VARCHAR(100)")
-
-        conn.commit()
-
-        # Phase 2 migrations
-        cursor.execute("PRAGMA table_info(alerts)")
-        alert_cols = [row[1] for row in cursor.fetchall()]
-        if alert_cols and "alert_level" not in alert_cols:
-            cursor.execute("ALTER TABLE alerts ADD COLUMN alert_level VARCHAR(20) DEFAULT 'INFO'")
-
-        cursor.execute("PRAGMA table_info(users)")
-        user_cols = [row[1] for row in cursor.fetchall()]
-        if not user_cols:
-            pass  # Will be created by create_all
-
-        conn.commit()
-        conn.close()
+        rows = conn.execute(
+            text(
+                """
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_name = :table_name
+                """
+            ),
+            {"table_name": table_name},
+        ).fetchall()
+        return {row[0] for row in rows}
     except Exception as e:
-        # Ignore if tables not yet created (create_all will create them)
-        pass
+        logger.warning("Could not inspect table %s during migration: %s", table_name, e)
+        return set()
 
+
+def _add_column(conn, table_name: str, column_name: str, ddl: str):
+    cols = _table_columns(conn, table_name)
+    if cols and column_name not in cols:
+        conn.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {ddl}"))
+        logger.info("Migrated %s.%s", table_name, column_name)
+
+
+def _rename_column(conn, table_name: str, old_name: str, new_name: str):
+    cols = _table_columns(conn, table_name)
+    if cols and old_name in cols and new_name not in cols:
+        conn.execute(text(f"ALTER TABLE {table_name} RENAME COLUMN {old_name} TO {new_name}"))
+        logger.info("Migrated %s.%s -> %s", table_name, old_name, new_name)
+
+
+def run_database_migrations():
+    """Applies non-destructive schema migrations for existing databases."""
+    try:
+        with engine.begin() as conn:
+            _add_column(conn, "incidents", "resolution_notes", "TEXT")
+            _add_column(conn, "incidents", "anpr_data", _json_default_sql())
+            _add_column(conn, "incidents", "affected_track_id", "VARCHAR(50)")
+            _add_column(conn, "incidents", "updated_at", _datetime_sql())
+
+            _add_column(conn, "audit_logs", "details", _json_default_sql())
+            _add_column(conn, "audit_logs", "created_at", _datetime_sql())
+
+            _add_column(conn, "events", "incident_id", "VARCHAR(100)")
+            _add_column(conn, "alerts", "alert_level", "VARCHAR(20) DEFAULT 'INFO'")
+
+            _rename_column(conn, "zones", "fence_height", "fence_depth")
+            _add_column(conn, "zones", "fence_type", "VARCHAR(10) DEFAULT '2D'")
+            _add_column(conn, "zones", "fence_depth", "FLOAT DEFAULT 0.0")
+    except Exception as e:
+        logger.exception("Database migration failed: %s", e)
+        raise
+
+
+# Backward-compatible name for older imports/scripts.
+def run_sqlite_migrations():
+    run_database_migrations()

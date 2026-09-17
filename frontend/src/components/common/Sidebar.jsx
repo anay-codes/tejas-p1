@@ -8,7 +8,6 @@ import {
   GitFork, 
   BarChart3, 
   Camera, 
-  ShieldAlert, 
   Sliders,
   MapPin,
   Cpu
@@ -29,7 +28,6 @@ const NAV_GROUPS = [
     items: [
       { name: 'Tracking', path: '/tracking', icon: GitFork },
       { name: 'ANPR & Plates', path: '/anpr', icon: ScanLine },
-      { name: 'Watchlist', path: '/watchlist', icon: ShieldAlert },
       { name: 'Analytics', path: '/analytics', icon: BarChart3 },
     ]
   },

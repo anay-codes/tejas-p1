@@ -1,9 +1,12 @@
 import logging
 import time
+import queue
+import re
+import threading
 from typing import List, Dict, Any, Optional
-import cv2
 from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -11,6 +14,7 @@ from app.models.models import Camera
 from app.schemas.schemas import CameraCreate, CameraUpdate, CameraResponse
 from app.services.camera_manager import camera_manager
 from app.services.reid_service import reid_service
+from app.services.video_source import VideoSource
 
 logger = logging.getLogger("tejas.api.cameras")
 
@@ -28,11 +32,9 @@ class ProbeRequest(BaseModel):
 
 
 def probe_video_source(source_str: str, source_type: str = "RTSP") -> Dict[str, Any]:
-    """Tests actual camera connection using OpenCV VideoCapture with failure isolation."""
-    import os
+    """Tests a camera source and always returns a bounded JSON result."""
     start = time.time()
     source_str = (source_str or "").strip()
-    parsed_source: Any = source_str
     st = (source_type or "").upper()
 
     if not source_str:
@@ -46,68 +48,75 @@ def probe_video_source(source_str: str, source_type: str = "RTSP") -> Dict[str, 
             "message": "Stream URL / device index cannot be empty."
         }
 
-    if st in ("WEBCAM", "LOCAL_CAM", "HARDWARE", "0", "1") or str(source_str).isdigit():
-        try:
-            parsed_source = int(source_str) if str(source_str).isdigit() else 0
-        except Exception:
-            parsed_source = 0
+    if st in ("WEBCAM", "LOCAL_CAM", "HARDWARE") or source_str.isdigit():
+        parsed_source: Any = int(source_str) if source_str.isdigit() else 0
+        timeout_seconds = 2.5
     else:
-        # For network streams, set 2.5s socket timeout
-        os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp|stimeout;2500000"
+        parsed_source = source_str
+        timeout_seconds = 5.0
 
-    try:
-        cap = cv2.VideoCapture(parsed_source)
-        if not cap.isOpened():
-            latency = round((time.time() - start) * 1000, 1)
-            return {
-                "status": "UNREACHABLE",
-                "connected": False,
-                "reachable": False,
-                "latency_ms": latency,
-                "fps": 0.0,
-                "resolution": "--",
-                "message": f"Could not connect to {source_type} stream at '{source_str}'. Verify device is online and accessible."
-            }
+    result_queue: queue.Queue = queue.Queue(maxsize=1)
 
-        ret, frame = cap.read()
-        latency = round((time.time() - start) * 1000, 1)
-        fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
-        w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or (frame.shape[1] if ret and frame is not None else 0))
-        h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or (frame.shape[0] if ret and frame is not None else 0))
-        cap.release()
+    def _probe_worker():
+        try:
+            result_queue.put(VideoSource.test_source(parsed_source, timeout_seconds=timeout_seconds))
+        except Exception as e:
+            result_queue.put({"success": False, "error": str(e)})
 
-        if not ret or frame is None or frame.size == 0:
-            return {
-                "status": "FRAME_ERROR",
-                "connected": False,
-                "reachable": False,
-                "latency_ms": latency,
-                "fps": 0.0,
-                "resolution": "--",
-                "message": "Stream connected but failed to return a valid video frame."
-            }
+    worker = threading.Thread(target=_probe_worker, daemon=True, name="CameraProbe")
+    worker.start()
+    worker.join(timeout_seconds + 1.0)
 
+    latency = round((time.time() - start) * 1000, 1)
+    if worker.is_alive():
         return {
-            "status": "CONNECTED",
-            "connected": True,
-            "reachable": True,
-            "latency_ms": latency,
-            "fps": round(fps, 1),
-            "resolution": f"{w}x{h}",
-            "codec": f"{st} / OPENCV",
-            "message": f"Stream probe verified: {w}x{h} @ {round(fps, 1)} FPS ({latency}ms latency)."
-        }
-    except Exception as e:
-        latency = round((time.time() - start) * 1000, 1)
-        return {
-            "status": "PROBE_EXCEPTION",
+            "status": "PROBE_TIMEOUT",
             "connected": False,
             "reachable": False,
             "latency_ms": latency,
             "fps": 0.0,
             "resolution": "--",
-            "message": f"Stream probe error: {str(e)}"
+            "message": f"Timed out while probing {source_type} source '{source_str}'. Verify the stream URL, phone app, firewall, and Wi-Fi network."
         }
+
+    try:
+        test = result_queue.get_nowait()
+    except queue.Empty:
+        test = {"success": False, "error": "Probe worker ended without a result"}
+
+    if not test.get("success"):
+        return {
+            "status": "UNREACHABLE",
+            "connected": False,
+            "reachable": False,
+            "latency_ms": latency,
+            "fps": 0.0,
+            "resolution": "--",
+            "message": test.get("error") or f"Could not connect to {source_type} stream at '{source_str}'."
+        }
+
+    return {
+        "status": "CONNECTED",
+        "connected": True,
+        "reachable": True,
+        "latency_ms": latency,
+        "fps": float(test.get("fps") or 30.0),
+        "resolution": test.get("resolution") or "--",
+        "codec": f"{st} / OPENCV",
+        "message": (
+            f"Stream probe verified: {test.get('resolution', '--')} "
+            f"@ {test.get('fps', 30.0)} FPS ({latency}ms latency)."
+        )
+    }
+
+
+def _normalize_camera_code(code: str) -> str:
+    normalized = re.sub(r"\s+", "-", (code or "").strip().upper())
+    normalized = re.sub(r"[^A-Z0-9_-]", "-", normalized)
+    normalized = re.sub(r"-{2,}", "-", normalized).strip("-")
+    if not normalized:
+        raise HTTPException(status_code=422, detail="Camera code cannot be empty")
+    return normalized
 
 
 INITIAL_CAMERAS = [
@@ -220,6 +229,16 @@ def get_camera(camera_id: str, db: Session = Depends(get_db)):
 
 @router.post("", response_model=CameraResponse)
 def create_camera(payload: CameraCreate, db: Session = Depends(get_db)):
+    payload_data = payload.model_dump()
+    payload_data["code"] = _normalize_camera_code(payload_data["code"])
+    payload_data["name"] = payload_data["name"].strip()
+    payload_data["location"] = payload_data["location"].strip()
+    payload_data["stream_type"] = (payload_data.get("stream_type") or "RTSP").strip().upper()
+    payload_data["stream_url"] = (payload_data.get("stream_url") or "").strip()
+
+    if db.query(Camera).filter(Camera.code == payload_data["code"]).first():
+        raise HTTPException(status_code=409, detail=f"Camera code '{payload_data['code']}' already exists")
+
     # Collision-safe ID generation: find max existing numeric ID
     existing_ids = [c.id for c in db.query(Camera.id).all()]
     max_num = 0
@@ -230,9 +249,14 @@ def create_camera(payload: CameraCreate, db: Session = Depends(get_db)):
         except (ValueError, AttributeError):
             pass
     cam_id = f"CAM-{max_num + 1:02d}"
-    db_cam = Camera(id=cam_id, **payload.model_dump())
+    db_cam = Camera(id=cam_id, **payload_data)
     db.add(db_cam)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as e:
+        db.rollback()
+        logger.warning("Camera create integrity error: %s", e)
+        raise HTTPException(status_code=409, detail="Camera code or ID already exists")
     db.refresh(db_cam)
 
     # Register into ReID topology
@@ -250,10 +274,24 @@ def update_camera(camera_id: str, payload: CameraUpdate, db: Session = Depends(g
         raise HTTPException(status_code=404, detail="Camera not found")
 
     update_dict = payload.model_dump(exclude_unset=True)
+    if "name" in update_dict and update_dict["name"] is not None:
+        update_dict["name"] = update_dict["name"].strip()
+    if "location" in update_dict and update_dict["location"] is not None:
+        update_dict["location"] = update_dict["location"].strip()
+    if "stream_type" in update_dict and update_dict["stream_type"] is not None:
+        update_dict["stream_type"] = update_dict["stream_type"].strip().upper()
+    if "stream_url" in update_dict and update_dict["stream_url"] is not None:
+        update_dict["stream_url"] = update_dict["stream_url"].strip()
+
     for k, v in update_dict.items():
         setattr(cam, k, v)
 
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as e:
+        db.rollback()
+        logger.warning("Camera update integrity error: %s", e)
+        raise HTTPException(status_code=409, detail="Camera update conflicts with an existing record")
     db.refresh(cam)
 
     # If stream url changed and pipeline is currently running, hot-switch source
@@ -354,4 +392,3 @@ def restart_camera_pipeline(camera_id: str, db: Session = Depends(get_db)):
         "camera_id": cam.id,
         "is_running": pipeline.is_running
     }
-

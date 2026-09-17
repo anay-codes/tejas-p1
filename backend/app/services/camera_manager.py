@@ -96,6 +96,7 @@ class CameraPipeline:
         self.lock = threading.Lock()
         self.frame_lock = threading.Lock()
         self.new_frame_event = threading.Event()
+        self.new_jpeg_event = threading.Event()
         self.event_queue: queue.Queue = queue.Queue(maxsize=10)
 
         # Buffers
@@ -298,6 +299,7 @@ class CameraPipeline:
                 with self.lock:
                     self.latest_jpeg = buf.tobytes()
                     self.latest_processed_frame = annotated
+                self.new_jpeg_event.set()
 
             elapsed = time.time() - loop_start
             time.sleep(max(0.001, target_delay - elapsed))
@@ -528,13 +530,15 @@ class CameraPipeline:
     def generate_mjpeg_stream(self):
         last_standby_time = 0.0
         while self.is_running:
+            self.new_jpeg_event.wait(timeout=0.1)
+            self.new_jpeg_event.clear()
+            
             with self.lock:
                 jpeg = self.latest_jpeg
                 connected = self.is_connected
             now = time.time()
             if jpeg and connected:
                 yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + jpeg + b"\r\n"
-                time.sleep(0.033)
             else:
                 # Send standby frame at ~2 fps so browser immediately displays status instead of spinning
                 if now - last_standby_time >= 0.5:
@@ -543,7 +547,6 @@ class CameraPipeline:
                     if standby:
                         yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + standby + b"\r\n"
                     last_standby_time = now
-                time.sleep(0.08)
 
 
 # ──────────────────────────────────────────────

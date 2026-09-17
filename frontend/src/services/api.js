@@ -1,30 +1,38 @@
-// TEJAS API Client Service with Authentication & Real Endpoints
-
-import { authService } from './auth';
+// TEJAS API Client Service with Real Endpoints
 
 const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
 
 function getAuthHeaders(extra = {}) {
-  const headers = { ...extra };
-  const token = authService.getToken();
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
+  return { ...extra };
+}
+
+async function readApiJson(res, fallbackMessage) {
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data.detail || data.error || data.message || fallbackMessage);
   }
-  return headers;
+  return data;
+}
+
+async function fetchWithTimeout(url, options = {}, timeoutMs = 12000) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 export const apiClient = {
   // ── Authentication Profile ──────────────────────────────
   async getCurrentUser() {
-    try {
-      const res = await fetch(`${BASE_URL}/auth/me`, {
-        headers: getAuthHeaders()
-      });
-      if (res.ok) return await res.json();
-    } catch (e) {
-      console.warn("apiClient.getCurrentUser failed:", e);
-    }
-    return null;
+    return {
+      username: 'open-operator',
+      role: 'ADMIN',
+      full_name: 'Duty Operator',
+      is_active: true
+    };
   },
 
   async getUsers() {
@@ -54,7 +62,7 @@ export const apiClient = {
 
   async probeCamera(sourceUrl, streamType = 'RTSP') {
     try {
-      const res = await fetch(`${BASE_URL}/cameras/probe`, {
+      const res = await fetchWithTimeout(`${BASE_URL}/cameras/probe`, {
         method: 'POST',
         headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ 
@@ -63,7 +71,7 @@ export const apiClient = {
           stream_type: streamType 
         })
       });
-      const data = await res.json();
+      const data = await readApiJson(res, 'Camera probe failed');
       return {
         ...data,
         reachable: data.reachable !== undefined ? data.reachable : (data.connected === true || data.status === 'CONNECTED'),
@@ -72,7 +80,13 @@ export const apiClient = {
         error: data.message || data.error || (data.connected === false ? 'Connection failed' : null)
       };
     } catch (e) {
-      return { reachable: false, error: e.message || "Network unreachable" };
+      const isNetworkFailure = e instanceof TypeError || /failed to fetch|network/i.test(e.message || '');
+      const message = e.name === 'AbortError'
+        ? 'Backend probe timed out. Check that the API is running on port 8000.'
+        : isNetworkFailure
+        ? 'Backend API unreachable. Start the backend on http://127.0.0.1:8000, then test the stream again.'
+        : (e.message || 'Backend API unreachable. Start the backend on port 8000 and try again.');
+      return { reachable: false, error: message };
     }
   },
 
@@ -142,18 +156,28 @@ export const apiClient = {
   },
 
   async testCamera(cameraId) {
-    const res = await fetch(`${BASE_URL}/cameras/${cameraId}/test`, {
-      method: 'POST',
-      headers: getAuthHeaders()
-    });
-    const data = await res.json();
-    return {
-      ...data,
-      reachable: data.reachable !== undefined ? data.reachable : (data.connected === true || data.status === 'CONNECTED'),
-      fps: data.fps || 0,
-      resolution: data.resolution || '--',
-      error: data.message || data.error || (data.connected === false ? 'Connection failed' : null)
-    };
+    try {
+      const res = await fetchWithTimeout(`${BASE_URL}/cameras/${cameraId}/test`, {
+        method: 'POST',
+        headers: getAuthHeaders()
+      });
+      const data = await readApiJson(res, 'Camera test failed');
+      return {
+        ...data,
+        reachable: data.reachable !== undefined ? data.reachable : (data.connected === true || data.status === 'CONNECTED'),
+        fps: data.fps || 0,
+        resolution: data.resolution || '--',
+        error: data.message || data.error || (data.connected === false ? 'Connection failed' : null)
+      };
+    } catch (e) {
+      const isNetworkFailure = e instanceof TypeError || /failed to fetch|network/i.test(e.message || '');
+      const message = e.name === 'AbortError'
+        ? 'Backend camera test timed out.'
+        : isNetworkFailure
+        ? 'Backend API unreachable. Start the backend on http://127.0.0.1:8000.'
+        : (e.message || 'Backend API unreachable');
+      return { reachable: false, fps: 0, resolution: '--', error: message };
+    }
   },
 
   // ── Zones Endpoints ─────────────────────────────────────
@@ -179,6 +203,18 @@ export const apiClient = {
       console.warn("Backend API unavailable for getZone");
     }
     return null;
+  },
+
+  async getZonesByCamera(cameraCode) {
+    try {
+      const res = await fetch(`${BASE_URL}/zones?camera_code=${encodeURIComponent(cameraCode)}`, {
+        headers: getAuthHeaders()
+      });
+      if (res.ok) return await res.json();
+    } catch (e) {
+      console.warn("Backend API unavailable for getZonesByCamera");
+    }
+    return [];
   },
 
   async createZone(zoneData) {

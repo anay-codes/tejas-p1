@@ -12,22 +12,12 @@ import Cameras from './pages/Cameras';
 import Zones from './pages/Zones';
 import Watchlist from './pages/Watchlist';
 import Settings from './pages/Settings';
-import Login from './pages/Login';
-
-import ProtectedRoute from './components/common/ProtectedRoute';
 
 export default function App() {
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/login" element={<Login />} />
-
-        {/* Protected Command Centre Layout */}
-        <Route element={
-          <ProtectedRoute>
-            <DashboardLayout />
-          </ProtectedRoute>
-        }>
+        <Route element={<DashboardLayout />}>
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/surveillance" element={<Surveillance />} />
@@ -39,11 +29,7 @@ export default function App() {
           <Route path="/cameras" element={<Cameras />} />
           <Route path="/zones" element={<Zones />} />
           <Route path="/watchlist" element={<Watchlist />} />
-          <Route path="/settings" element={
-            <ProtectedRoute allowedRoles={['ADMIN', 'OPERATOR']}>
-              <Settings />
-            </ProtectedRoute>
-          } />
+          <Route path="/settings" element={<Settings />} />
         </Route>
 
         <Route path="*" element={<Navigate to="/dashboard" replace />} />

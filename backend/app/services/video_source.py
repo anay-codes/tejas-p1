@@ -42,10 +42,11 @@ class VideoSource:
                 source_str = str(source).strip()
                 try:
                     if source_str.startswith("rtsp://") or source_str.startswith("rtsps://"):
-                        os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp|fflags;nobuffer|max_delay;500000"
+                        os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp|fflags;nobuffer|max_delay;500000|stimeout;3000000"
                         cap = cv2.VideoCapture(source_str, cv2.CAP_FFMPEG)
                     else:
-                        cap = cv2.VideoCapture(source_str)
+                        os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "stimeout;3000000"
+                        cap = cv2.VideoCapture(source_str, cv2.CAP_FFMPEG)
                 except (cv2.error, Exception) as cap_err:
                     logger.warning(f"VideoCapture('{source_str}') initialization error: {cap_err}")
                     return None

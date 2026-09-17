@@ -38,6 +38,9 @@ class Zone(Base):
     threat_weight = Column(Integer, default=30)
     points_json = Column(JSON, default=list)
     rule_triggers = Column(JSON, default=list)
+    # Phase 3: 3D fence support — backward compatible (2D is default)
+    fence_type = Column(String(10), default="2D")   # "2D" or "3D"
+    fence_depth = Column(Float, default=0.0)        # metres (camera-space extrusion depth)
 
 class WatchlistEntry(Base):
     __tablename__ = "watchlist"
