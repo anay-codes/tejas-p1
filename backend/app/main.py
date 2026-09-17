@@ -56,7 +56,7 @@ def _seed_initial_data():
                 type="RESTRICTED",
                 color="#EF4444",
                 camera_code="CAM-00",
-                threat_weight=0,   # not used in Phase 2
+                threat_weight=0,
                 points_json=[
                     {"x": 15, "y": 20},
                     {"x": 85, "y": 20},
@@ -64,6 +64,8 @@ def _seed_initial_data():
                     {"x": 15, "y": 85},
                 ],
                 rule_triggers=[],
+                fence_type="3D",
+                fence_depth=2.5,
             ))
 
         db.commit()

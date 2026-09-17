@@ -21,7 +21,9 @@ INITIAL_ZONES = [
         "camera_code": "RESTRICTED-Z01",
         "threat_weight": 30,
         "points_json": [{"x": 15, "y": 35}, {"x": 85, "y": 30}, {"x": 90, "y": 85}, {"x": 10, "y": 85}],
-        "rule_triggers": ["Intrusion", "Loitering > 60s"]
+        "rule_triggers": ["Intrusion", "Loitering > 60s"],
+        "fence_type": "2D",
+        "fence_depth": 0.0,
     },
     {
         "id": "ZONE-02",
@@ -31,7 +33,9 @@ INITIAL_ZONES = [
         "camera_code": "BOP-04",
         "threat_weight": 20,
         "points_json": [{"x": 30, "y": 25}, {"x": 80, "y": 25}, {"x": 80, "y": 75}, {"x": 30, "y": 75}],
-        "rule_triggers": ["Directional Vector", "Unattended Object"]
+        "rule_triggers": ["Directional Vector", "Unattended Object"],
+        "fence_type": "3D",
+        "fence_depth": 3.5,
     },
     {
         "id": "ZONE-03",
@@ -41,7 +45,9 @@ INITIAL_ZONES = [
         "camera_code": "BOP-03",
         "threat_weight": 15,
         "points_json": [{"x": 5, "y": 60}, {"x": 95, "y": 55}, {"x": 95, "y": 95}, {"x": 5, "y": 95}],
-        "rule_triggers": ["Night Motion", "Human Entry"]
+        "rule_triggers": ["Night Motion", "Human Entry"],
+        "fence_type": "3D",
+        "fence_depth": 5.0,
     }
 ]
 

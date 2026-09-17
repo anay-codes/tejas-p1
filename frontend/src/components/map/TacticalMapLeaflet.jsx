@@ -151,40 +151,36 @@ export default function TacticalMapLeaflet({
   };
 
   const renderedPolygons = useMemo(() => {
-    return zones.map((z, idx) => {
-      const sectorZoneCoords = [
-        [
-          [32.7310, 74.8630],
-          [32.7350, 74.8670],
-          [32.7335, 74.8720],
-          [32.7290, 74.8660]
-        ],
-        [
-          [32.7295, 74.8610],
-          [32.7325, 74.8635],
-          [32.7305, 74.8670],
-          [32.7280, 74.8640]
-        ],
-        [
-          [32.7250, 74.8550],
-          [32.7285, 74.8580],
-          [32.7270, 74.8610],
-          [32.7235, 74.8570]
-        ],
-        [
-          [32.7260, 74.8560],
-          [32.7275, 74.8585],
-          [32.7265, 74.8595],
-          [32.7250, 74.8570]
-        ]
-      ];
-      const positions = sectorZoneCoords[idx % sectorZoneCoords.length];
+    return zones.map((z) => {
+      const rawPoints = Array.isArray(z.points_json) && z.points_json.length >= 3
+        ? z.points_json
+        : Array.isArray(z.points) && z.points.length >= 3
+          ? z.points
+          : [];
+
+      const positions = rawPoints.length >= 3
+        ? rawPoints.map(pt => {
+            const x = Number(pt?.x ?? pt?.lat ?? 0);
+            const y = Number(pt?.y ?? pt?.lng ?? 0);
+            const lat = Number.isFinite(x) ? x : 32.7285;
+            const lng = Number.isFinite(y) ? y : 74.8605;
+            return [lat, lng];
+          })
+        : [
+            [32.7310, 74.8630],
+            [32.7350, 74.8670],
+            [32.7335, 74.8720],
+            [32.7290, 74.8660]
+          ];
+
       return {
         id: z.id,
         name: z.name,
         type: z.type,
         color: z.color || '#DC2626',
-        positions
+        positions,
+        fence_type: z.fence_type || '2D',
+        fence_depth: Number(z.fence_depth || 0.0),
       };
     });
   }, [zones]);
@@ -290,28 +286,44 @@ export default function TacticalMapLeaflet({
 
           {/* Render Polygonal Restricted Zones */}
           {showZones && renderedPolygons.map(zone => (
-            <Polygon
-              key={zone.id}
-              positions={zone.positions}
-              pathOptions={{
-                color: zone.color,
-                fillColor: zone.color,
-                fillOpacity: 0.20,
-                weight: 1.5,
-                dashArray: '4, 4'
-              }}
-            >
-              <Popup>
-                <div className="text-xs space-y-1 p-1">
-                  <div className="font-bold text-red-700 flex items-center gap-1">
-                    <ShieldAlert className="w-3.5 h-3.5" />
-                    <span>{zone.name}</span>
+            <React.Fragment key={zone.id}>
+              <Polygon
+                positions={zone.positions}
+                pathOptions={{
+                  color: zone.fence_type === '3D' ? '#4F46E5' : zone.color,
+                  fillColor: zone.color,
+                  fillOpacity: zone.fence_type === '3D' ? 0.28 : 0.20,
+                  weight: zone.fence_type === '3D' ? 2 : 1.5,
+                  dashArray: zone.fence_type === '3D' ? '3, 5' : '4, 4'
+                }}
+              >
+                <Popup>
+                  <div className="text-xs space-y-1 p-1">
+                    <div className="font-bold text-red-700 flex items-center gap-1">
+                      <ShieldAlert className="w-3.5 h-3.5" />
+                      <span>{zone.name}</span>
+                    </div>
+                    <div className="text-slate-500 text-[11px]">Type: {zone.type}</div>
+                    <div className="text-slate-600 text-[11px]">{zone.fence_type || '2D'} fence · {zone.fence_depth > 0 ? `${zone.fence_depth}m depth` : 'ground footprint'}</div>
                   </div>
-                  <div className="text-slate-500 text-[11px]">Type: {zone.type}</div>
-                  <div className="text-slate-600 text-[11px]">Perimeter detection active</div>
-                </div>
-              </Popup>
-            </Polygon>
+                </Popup>
+              </Polygon>
+              {zone.fence_type === '3D' && (
+                <Polygon
+                  positions={zone.positions.map(([lat, lng], idx) => {
+                    const drift = idx % 2 === 0 ? 0.0005 : -0.0005;
+                    return [lat + drift, lng + 0.0007];
+                  })}
+                  pathOptions={{
+                    color: '#A5B4FC',
+                    fillColor: '#818CF8',
+                    fillOpacity: 0.08,
+                    weight: 1,
+                    dashArray: '2, 4'
+                  }}
+                />
+              )}
+            </React.Fragment>
           ))}
 
           {/* Render Camera Nodes from Database */}

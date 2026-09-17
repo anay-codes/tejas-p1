@@ -159,6 +159,9 @@ class CameraPipeline:
                     "type": z.type,
                     "color": z.color or "#EF4444",
                     "points_json": z.points_json or [],
+                    "fence_type": z.fence_type or "2D",
+                    "fence_depth": float(z.fence_depth or 0.0),
+                    "camera_code": z.camera_code,
                 }
                 for z in db_zones
             ]

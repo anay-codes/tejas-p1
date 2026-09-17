@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { MapPin, Plus, Trash2, Layers, Save, Video, CheckCircle, AlertTriangle } from 'lucide-react';
 import { apiClient } from '../services/api';
+import { normalizeZoneEntry, buildZonePayload } from '../utils/zoneModel';
 
 const ZONE_TYPE_METRICS = {
   RESTRICTED: { level: 'ALERT', color: '#DC2626', desc: 'Immediate intrusion alert generated', badgeBg: 'bg-red-50 text-red-700 border-red-200' },
@@ -37,19 +38,13 @@ export default function Zones() {
         apiClient.getCameras()
       ]);
 
-      const loadedZones = (zData || []).map(z => ({
-        id: z.id,
-        name: z.name,
-        type: z.type,
-        color: z.color || ZONE_TYPE_METRICS[z.type]?.color || '#DC2626',
-        cameraCode: z.camera_code || 'CAM-00',
-        points: Array.isArray(z.points_json) && z.points_json.length >= 3 
-          ? z.points_json 
-          : [{ x: 15, y: 25 }, { x: 85, y: 25 }, { x: 85, y: 85 }, { x: 15, y: 85 }],
-        ruleTriggers: z.rule_triggers || ["Intrusion"],
-        fence_type: z.fence_type || '2D',
-        fence_depth: z.fence_depth || 0.0,
-      }));
+      const loadedZones = (zData || []).map((z) => {
+        const normalized = normalizeZoneEntry(z);
+        return {
+          ...normalized,
+          color: z.color || ZONE_TYPE_METRICS[z.type]?.color || '#DC2626',
+        };
+      });
 
       setZones(loadedZones);
       if (loadedZones.length > 0) {
@@ -117,7 +112,8 @@ export default function Zones() {
     setIsSaving(true);
     try {
       await apiClient.updateZone(selectedZone.id, {
-        points_json: selectedZone.points
+        ...buildZonePayload(selectedZone),
+        points_json: selectedZone.points,
       });
       setHasUnsavedChanges(false);
       setSaveSuccess(true);
@@ -157,13 +153,8 @@ export default function Zones() {
     try {
       const created = await apiClient.createZone(zonePayload);
       const mapped = {
-        id: created.id,
-        name: created.name,
-        type: created.type,
+        ...normalizeZoneEntry(created),
         color: created.color || meta.color,
-        cameraCode: created.camera_code,
-        points: created.points_json || zonePayload.points_json,
-        ruleTriggers: created.rule_triggers
       };
       setZones(prev => [...prev, mapped]);
       setSelectedZone(mapped);
@@ -378,13 +369,11 @@ export default function Zones() {
                   </div>
                 </div>
 
-                {/* 3D Fence depth — only shown for 3D mode */}
                 {newFenceType === '3D' && (
                   <div className="p-3 rounded-lg bg-indigo-50 border border-indigo-200 space-y-2">
                     <p className="text-[10px] text-indigo-700 font-medium uppercase tracking-wide">3D Fence Configuration</p>
                     <p className="text-[10px] text-indigo-600">
-                      Ground footprint defined by the polygon below. Specify the depth
-                      (camera-space estimate — physical accuracy requires calibration).
+                      Trace the ground footprint over the live camera image. The fence depth is stored with the zone so the perimeter remains remembered and reusable.
                     </p>
                     <div>
                       <label className="block text-slate-600 font-medium mb-1">Depth (m)</label>
@@ -400,8 +389,7 @@ export default function Zones() {
                       </div>
                     </div>
                     <p className="text-[10px] text-indigo-500">
-                      The ground footprint polygon is drawn in the canvas on the right.
-                      The depth parameter is stored and used during zone evaluation.
+                      The polygon below is saved to the selected camera and reloaded the next time you open this boundary.
                     </p>
                   </div>
                 )}
@@ -473,12 +461,19 @@ export default function Zones() {
             <div className="relative aspect-video bg-slate-900 rounded-lg border border-slate-800 overflow-hidden flex items-center justify-center">
               {/* Optional Camera Feed Background */}
               {showLiveFeed && selectedZone && (
-                <img
-                  src={`http://localhost:8000/api/video/feed?camera_id=${encodeURIComponent(selectedZone.cameraCode)}`}
-                  alt="Camera Calibration Feed"
-                  className="absolute inset-0 w-full h-full object-cover opacity-70 pointer-events-none"
-                  onError={(e) => { e.currentTarget.style.display = 'none'; }}
-                />
+                <>
+                  <img
+                    src={`http://localhost:8000/api/video/feed?camera_id=${encodeURIComponent(selectedZone.cameraCode)}`}
+                    alt="Camera Calibration Feed"
+                    className="absolute inset-0 w-full h-full object-cover opacity-70 pointer-events-none"
+                    onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                  />
+                  <div className="absolute inset-x-0 top-0 z-10 flex justify-center pointer-events-none">
+                    <div className="mt-3 rounded-full border border-white/30 bg-slate-900/65 px-2.5 py-1 text-[10px] font-medium text-slate-100 backdrop-blur-sm">
+                      Live calibration view · {selectedZone.cameraCode}
+                    </div>
+                  </div>
+                </>
               )}
 
               {/* Camera reference label */}
@@ -499,6 +494,7 @@ export default function Zones() {
                   .map((z) => {
                     const pointsStr = z.points.map(p => `${p.x},${p.y}`).join(' ');
                     const isSelected = z.id === selectedZone?.id;
+                    const is3D = (z.fence_type || '2D') === '3D';
 
                     return (
                       <g key={z.id}>
@@ -510,7 +506,20 @@ export default function Zones() {
                           stroke={z.color}
                           strokeWidth={isSelected ? 0.8 : 0.4}
                           strokeDasharray={isSelected ? "2 1" : "none"}
+                          opacity={is3D ? 0.95 : 1}
                         />
+
+                        {is3D && (
+                          <polygon
+                            points={pointsStr}
+                            fill="none"
+                            stroke="#4F46E5"
+                            strokeWidth={0.45}
+                            strokeDasharray="1 1"
+                            opacity={0.9}
+                            transform="translate(0.8, 0.8)"
+                          />
+                        )}
 
                         {/* Interactive Drag Handles */}
                         {isSelected && z.points.map((pt, pIdx) => (
@@ -533,7 +542,7 @@ export default function Zones() {
                               fontFamily="sans-serif"
                               className="pointer-events-none select-none font-semibold shadow"
                             >
-                              {pIdx + 1} ({pt.x}%, {pt.y}%)
+                              {pIdx + 1} {z.fence_type === '3D' ? `(${pt.x}%, ${pt.y}%) [3D ${z.fence_depth || 0}m]` : `(${pt.x}%, ${pt.y}%)`}
                             </text>
                           </g>
                         ))}
